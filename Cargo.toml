@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hermit-core",
+    "crates/feedback",
+    "crates/sbx-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/RARS-oss/sandbox-executor"
+description = "sbx: a hermetic Linux sandbox executor that returns typed, delta-aware machine feedback to LLM coding agents instead of raw stdout"
+
+[workspace.dependencies]
+hermit-core = { path = "crates/hermit-core" }
+feedback = { path = "crates/feedback" }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+nix = { version = "0.29", features = ["sched", "mount", "process", "signal", "user", "fs", "resource", "hostname", "poll", "time"] }
+libc = "0.2"
+seccompiler = "0.5"
+regex = "1"
+once_cell = "1"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"

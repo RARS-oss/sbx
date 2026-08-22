@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --workspace
+
+      - name: Build sbx
+        run: cargo build --release -p sbx-cli
+
+      # GitHub's Ubuntu runners allow unprivileged user namespaces; exercise the real sandbox.
+      - name: Sandbox selftest
+        run: ./target/release/sbx selftest
+
+      - name: Startup benchmark
+        run: ./target/release/sbx bench --n 20
+
+      - name: End-to-end ASan verdict + delta
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gcc
+          mkdir -p /tmp/e2e && cp bench/demo/*.c /tmp/e2e/
+          ./target/release/sbx run --work /tmp/e2e -- sh -c 'gcc -g -O0 -fsanitize=address -fno-omit-frame-pointer overflow.c -o overflow && ./overflow' | tee /tmp/e2e/v1.txt || true
+          grep -q "heap-buffer-overflow" /tmp/e2e/v1.txt
+          ./target/release/sbx run --work /tmp/e2e -- sh -c 'gcc -g -O0 -fsanitize=address -fno-omit-frame-pointer uaf.c -o uaf && ./uaf' | tee /tmp/e2e/v2.txt || true
+          grep -q "crash: moved" /tmp/e2e/v2.txt
+          ./target/release/sbx run --work /tmp/e2e -- ./uaf | tee /tmp/e2e/v3.txt || true
+          grep -q "crash: SAME" /tmp/e2e/v3.txt
+
+      - name: Benchmark tasks validate (buggy fails, solution passes, inside sbx)
+        run: |
+          sudo apt-get install -y -qq g++ >/dev/null
+          export PATH="$PWD/target/release:$PATH"
+          bash bench/scripts/validate_tasks.sh
+
+      - name: Hook adapter smoke test
+        run: |
+          export PATH="$PWD/target/release:$PATH"
+          python3 - <<'PY'
+          import json, subprocess, pathlib
+          raw = pathlib.Path("crates/feedback/tests/fixtures/asan_heap_overflow.txt").read_text()
+          payload = {"tool_name": "Bash", "cwd": "/tmp/e2e", "tool_input": {"command": "./a.out"},
+                     "tool_output": raw, "tool_output_is_error": True}
+          r = subprocess.run(["python3", "adapters/claude-code/sbx_hook.py"], input=json.dumps(payload), capture_output=True, text=True)
+          assert r.returncode == 0, r.stderr
+          out = json.loads(r.stdout)
+          text = out["hookSpecificOutput"]["toolOutput"]
+          assert "heap-buffer-overflow" in text and len(text) < len(raw) / 2, text
+          print("hook ok:", len(raw), "->", len(text), "bytes")
+          PY

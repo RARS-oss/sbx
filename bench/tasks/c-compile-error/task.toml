@@ -1,0 +1,14 @@
+name = "c-compile-error"
+lang = "c"
+family = "build"
+bug = "two compile errors (undeclared identifier, wrong return type) plus warnings"
+prompt = """
+`stats.c` reads integers from stdin and prints `min=<m> max=<M> mean=<mean with 2 decimals>`.
+`sh test.sh` compiles it (warnings enabled) and checks the output on several inputs. Right now
+the program does not even compile. Fix `stats.c` so that it builds cleanly and passes the tests;
+do not modify `test.sh` or the output format.
+"""
+run = "sh test.sh"
+files = ["stats.c"]
+protected = ["test.sh"]
+timeout = 120

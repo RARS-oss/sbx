@@ -1,0 +1,15 @@
+name = "c-haystack-oob"
+lang = "c"
+family = "memory-safety"
+bug = "off-by-one length guard in one of 24 near-identical field handlers"
+prompt = """
+`fields.c` reads `<field> <value>` lines and copies each value into a fixed 16-byte slot for that
+field, behind a per-field length guard. `sh test.sh` builds it with AddressSanitizer and feeds inputs.
+Exactly one of the 24 field handlers has an off-by-one length guard, so a 16-character value to that
+field overflows its slot. Fix the single incorrect guard without changing the output format or the
+other handlers. Make the minimal correct change.
+"""
+run = "sh test.sh"
+files = ["fields.c"]
+protected = ["test.sh"]
+timeout = 120

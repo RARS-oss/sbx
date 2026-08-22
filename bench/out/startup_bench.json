@@ -1,0 +1,4 @@
+{"variant": "plain spawn", "n": 30, "min": 0.68, "median": 0.89, "p90": 1.21, "mean": 0.94, "sd": 0.15, "note": "under load (3b pilot running)"}
+{"variant": "sbx (full: ns+pivot_root+seccomp+lo)", "n": 30, "min": 9.76, "median": 11.2, "p90": 12.68, "mean": 11.25, "sd": 0.96, "note": "under load (3b pilot running)"}
+{"variant": "sbx --no-seccomp --no-loopback", "n": 30, "min": 7.99, "median": 10.31, "p90": 12.38, "mean": 10.54, "sd": 1.61, "note": "under load (3b pilot running)"}
+{"variant": "bubblewrap (unshare-all, ro /usr, tmpfs /tmp, proc, dev)", "n": 30, "min": 5.91, "median": 8.85, "p90": 10.94, "mean": 8.92, "sd": 1.67, "note": "under load (3b pilot running)"}

@@ -1,0 +1,14 @@
+name = "c-cascade"
+lang = "c"
+family = "memory-safety"
+bug = "three cascading bugs: two off-by-one heap overflows then a comparison logic error"
+prompt = """
+`stats.c` reads N then N integers and prints `mean=<floor mean> above=<count of values >= mean>`.
+`sh test.sh` builds it with AddressSanitizer and checks its output. It currently fails. There may be
+more than one bug; fix them so all checks pass, without changing the output format. Make minimal
+changes.
+"""
+run = "sh test.sh"
+files = ["stats.c"]
+protected = ["test.sh"]
+timeout = 120

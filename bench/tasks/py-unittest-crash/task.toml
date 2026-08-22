@@ -1,0 +1,15 @@
+name = "py-unittest-crash"
+lang = "python"
+family = "runtime-exception"
+bug = "KeyError on removing a missing item + wrong total after removal"
+prompt = """
+`inventory.py` is a small in-memory inventory: `add(name, qty)`, `remove(name, qty=None)`
+(remove some or all of an item; removing a missing item must be a no-op), `total()` (sum of
+quantities) and `names()` (sorted names). `sh test.sh` runs the unittest suite in
+`test_inventory.py`; some tests currently fail. Fix `inventory.py` so the whole suite passes.
+Do not modify the tests.
+"""
+run = "sh test.sh"
+files = ["inventory.py", "test_inventory.py"]
+protected = ["test.sh", "test_inventory.py"]
+timeout = 60

@@ -1,0 +1,16 @@
+name = "py-cli-args"
+lang = "python"
+family = "logic"
+bug = "hand-rolled argument parser: '--key=value' form, repeated flags and '--' terminator mishandled"
+prompt = """
+`cli.py` implements `parse_args(argv)` for a tiny CLI: it returns `(flags, positionals)` where
+flags is a dict. Rules: `--name value` and `--name=value` both set flags['name']='value'; a bare
+`--verbose` (no value, next token is another flag or end) sets flags['verbose']=True; a repeated
+flag keeps the LAST value; everything after a bare `--` is positional, even if it starts with `-`;
+`-x` short flags behave like `--x`. `sh test.sh` runs the unittest suite in `test_cli.py`; several
+tests fail. Fix `cli.py` so the suite passes. Do not modify the tests.
+"""
+run = "sh test.sh"
+files = ["cli.py", "test_cli.py"]
+protected = ["test.sh", "test_cli.py"]
+timeout = 60

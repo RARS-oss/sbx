@@ -1,0 +1,27 @@
+test_add (test_inventory.TestInventory.test_add) ... ok
+test_remove_missing (test_inventory.TestInventory.test_remove_missing) ... ERROR
+test_total (test_inventory.TestInventory.test_total) ... FAIL
+test_empty (test_inventory.TestInventory.test_empty) ... ok
+
+======================================================================
+ERROR: test_remove_missing (test_inventory.TestInventory.test_remove_missing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/test_inventory.py", line 14, in test_remove_missing
+    inv.remove("ghost")
+  File "/work/inventory.py", line 12, in remove
+    del self.items[name]
+KeyError: 'ghost'
+
+======================================================================
+FAIL: test_total (test_inventory.TestInventory.test_total)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/test_inventory.py", line 20, in test_total
+    self.assertEqual(inv.total(), 5)
+AssertionError: 4 != 5
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.002s
+
+FAILED (failures=1, errors=1)

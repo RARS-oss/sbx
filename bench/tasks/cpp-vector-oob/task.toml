@@ -1,0 +1,15 @@
+name = "cpp-vector-oob"
+lang = "cpp"
+family = "memory-safety"
+bug = "std::vector out-of-bounds access in a grid neighbour count (ASan container overflow/heap OOB)"
+prompt = """
+`grid.cpp` reads a grid of '.' and '#' characters (first line: rows cols; then rows lines) and
+prints, for each cell, the number of '#' among its 8 neighbours (cells outside the grid count as
+'.'), as a grid of digits. `sh test.sh` builds it with AddressSanitizer/UBSan and checks known
+outputs; the tests currently fail. Fix the bug in `grid.cpp`; do not modify `test.sh` or the output
+format.
+"""
+run = "sh test.sh"
+files = ["grid.cpp"]
+protected = ["test.sh"]
+timeout = 180

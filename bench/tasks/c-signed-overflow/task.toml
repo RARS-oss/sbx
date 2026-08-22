@@ -1,0 +1,15 @@
+name = "c-signed-overflow"
+lang = "c"
+family = "undefined-behaviour"
+bug = "signed integer overflow in a rolling checksum (UBSan)"
+prompt = """
+`checksum.c` computes a 32-bit rolling checksum over stdin bytes and prints it as 8 hex digits:
+for each byte b, `h = h * 31 + b`, with wrap-around modulo 2^32 (like Java's String.hashCode,
+but over bytes). `sh test.sh` builds it with AddressSanitizer/UBSan and checks known outputs.
+The tests currently fail. Fix the bug in `checksum.c`; do not modify `test.sh` or the output
+format.
+"""
+run = "sh test.sh"
+files = ["checksum.c"]
+protected = ["test.sh"]
+timeout = 120

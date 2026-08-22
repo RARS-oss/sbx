@@ -1,0 +1,22 @@
+name = "rust-index-panic"
+lang = "rust"
+family = "runtime-panic"
+bug = "index out of bounds + off-by-one in a sliding-window max (panic with backtrace)"
+prompt = """
+`main.rs` reads a window size K on the first line and then integers (one per line), and prints the
+maximum of every window of K consecutive values, one per line (`sliding_max`). If there are fewer
+than K values it prints nothing. `sh test.sh` builds it with `rustc` (debug, RUST_BACKTRACE=1) and
+checks known outputs; the tests currently fail. Fix `main.rs` so the suite passes; do not modify
+`test.sh` or the output format.
+"""
+run = "sh test.sh"
+files = ["main.rs"]
+protected = ["test.sh"]
+timeout = 180
+# Host toolchain bound read-only into the sandbox; PATH/RUSTUP_HOME/CARGO_HOME layered over the
+# hermetic env ("~" is expanded by the harness). Same for every condition.
+ro_binds = ["~/.cargo", "~/.rustup"]
+[env]
+PATH = "~/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+RUSTUP_HOME = "~/.rustup"
+CARGO_HOME = "~/.cargo"

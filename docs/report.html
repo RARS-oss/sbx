@@ -1,0 +1,2599 @@
+<title>sbx Technical Report</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{--bg:#F6F7F5;--panel:#fff;--ink:#1b2125;--ink2:#3f4950;--muted:#69747c;--line:#d5dbd8;--acc:#2c6b8c;--acc2:#2e7d4f;--code:#eef2f0}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#14181b;--panel:#1e2529;--ink:#e6eaec;--ink2:#c4ccd1;--muted:#909ba4;--line:#2f393f;--acc:#78b6d6;--acc2:#72c596;--code:#242c31}}
+:root[data-theme="dark"]{--bg:#14181b;--panel:#1e2529;--ink:#e6eaec;--ink2:#c4ccd1;--muted:#909ba4;--line:#2f393f;--acc:#78b6d6;--acc2:#72c596;--code:#242c31}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.55 "Source Serif 4",Georgia,serif}
+.wrap{max-width:860px;margin:0 auto;padding:40px 22px 80px}
+h1{font-family:"Newsreader",Georgia,serif;font-weight:500;font-size:2.2rem;line-height:1.12;margin:.2rem 0 .6rem;letter-spacing:-.01em}
+h2{font-family:"Newsreader",Georgia,serif;font-weight:500;font-size:1.55rem;margin:2.2rem 0 .7rem;padding-top:1.2rem;border-top:1px solid var(--line)}
+h3{font-size:1.08rem;margin:1.5rem 0 .5rem;font-family:"Source Sans 3",system-ui,sans-serif}
+p{margin:0 0 .9rem}em.lede{color:var(--ink2)}
+code,pre{font-family:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.84em}
+code{background:var(--code);padding:.08em .35em;border-radius:3px}
+pre{background:var(--code);border:1px solid var(--line);border-radius:4px;padding:.9rem 1rem;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0}
+.tbl{overflow-x:auto;margin:.6rem 0 1.2rem;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-family:"Source Sans 3",system-ui,sans-serif;font-size:.9rem;min-width:560px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--bg);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+figure{margin:1.2rem 0 1.6rem;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+figure svg{width:100%;height:auto;display:block}
+figcaption{font-family:"Source Sans 3",system-ui,sans-serif;font-size:.85rem;color:var(--muted);margin-top:.4rem}
+ul,ol{margin:0 0 1rem;padding-left:1.3rem}li{margin:0 0 .3rem}
+a{color:var(--acc)}hr{border:0;border-top:1px solid var(--line);margin:1.6rem 0}
+.meta{font-family:"JetBrains Mono",monospace;font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+blockquote{border-left:3px solid var(--acc);margin:0 0 1rem;padding:.4rem .9rem;color:var(--ink2);background:var(--panel)}
+</style>
+<div class="wrap">
+<h1>sbx: a hermetic executor that returns typed, delta-aware feedback to coding agents</h1>
+<p><em>A design-and-measurement study of what a coding agent should be shown after it runs code: a 4–11 ms unprivileged sandbox that owns the facts (exit, signal, sanitizer report, test results), emits them as a typed verdict with "what changed since last run", and a controlled experiment on whether that changes how many turns and tokens a model needs to fix a bug.</em></p>
+<p><strong>Status (2026-08-23):</strong> system complete and verified (tests, containment probes, localization check, fuzzing, live hook test); local open-weight pilots done for Qwen2.5-Coder 3 B (48 episodes) and 7 B (44/48 at ≤15 turns; a 20-turn re-run is queued); frontier-model arm run via the Claude Code CLI (no API key), including a causal verdict-corruption study (§6.7).</p>
+<hr>
+<h2>Abstract</h2>
+<p>Coding agents spend most of their context window on what their tools print — 45–84 % of input tokens across SWE-agent, Terminal-Bench and Claude Code traces — and every deployed harness shapes that output the same way, by byte or line truncation. The obvious remedy, compressing stdout before the model sees it, has been tried at scale (RTK and ~15 clones, 2026) and independently shown <strong>not</strong> to reduce billed cost (+7.6 % in one study; r = 0.15 between token reduction and cost in another), because an agent that loses information spends extra turns recovering it. We take a different position: <strong>the executor already has the facts</strong>, so it should emit facts — and, because it sees consecutive runs, it should emit <em>what changed</em>. We built <strong>sbx</strong>, an unprivileged Linux sandbox (user/pid/mount/net/uts/ipc/cgroup namespaces, <code>pivot_root</code>, seccomp denylist, loopback via netlink, fixed environment, no ASLR) whose result is a typed <strong>Verdict</strong> (compiler diagnostics, crash object with first user frame and allocation/free sites, test failures by root cause) and a <strong>Delta</strong> against the previous run. Four results. <strong>(1) Mechanism:</strong> the full profile costs 4.6 ms per run idle (11 ms under load) — within 2.4 ms of bubblewrap and 10–50× below Docker/gVisor — so it can wrap every compile/test call. <strong>(2) Determinism is a precondition for deltas:</strong> under the hermetic profile the failing output of four sanitizer tasks is byte-identical across 10/10 runs; with ASLR on, 0/10 — and, before we made crash identity address-free, even the <em>identity</em> used by the delta drifted. <strong>(3) Feedback form is a lever at the margin of capability — measured across three model tiers.</strong> On a weak local model (Qwen2.5-Coder 3 B, ≤12 turns) that cannot fix a bug from the source alone, raw output solved 0/12 tasks, the typed verdict 2/12 and typed + delta 3/12, at 40.8 k → 17.5 k input tokens — the predicted direction on every axis. A 7 B model shows a floor effect (1–2/11 in every condition). And Claude Sonnet 4.6 (driven through the Claude Code CLI, no API key) exposes the boundary exactly: on these short single-file bugs it fixes from the source and <em>never runs the buggy code</em> (first-run = pass in 12/12), so the feedback is unused and form is irrelevant — but when we force the buggy run into context, all six tasks are solved in both conditions in the same ~6 turns while the typed verdict shows the model <strong>7× fewer characters on average (up to 20× on a 36 KB sanitizer report), at equal cost</strong> — the "same outcome, far less context" that byte-compression was shown <em>not</em> to deliver. <strong>(4) The agent does not <em>trust</em> the verdict — it verifies.</strong> Holding execution byte-identical and corrupting <em>only</em> the shown verdict, Claude Sonnet 4.6 never once follows a coherent, undetectable lie about <em>where</em> the bug is (<strong>0/7 steered</strong> across five tasks &mdash; including a 24-guard haystack built to force reliance on the verdict &mdash; the decoy untouched in 22 attempts) or <em>what</em> it is (wrong crash class, 0/4); it repairs the real bug from source, succeeding even with <strong>no feedback at all</strong> — a clean causal null (byte-identical-execution audited) that sharpens (3) into a law: a corrupted or nondeterministic verdict can mislead the agent only where it cannot self-verify, which is exactly where a <em>correct</em> verdict matters most. Independently of the agent result, the verdict points at the ground-truth faulting line on 10/10 tasks, the executor held 29/29 containment probes, the parsers survived 300 fuzzed inputs, and the hook ran live inside a real Claude Code session (2 647 → 544 bytes, 114 ms). Everything — executor, parsers, hook, 12 validated tasks, three-tier harness, figures — is open source and reproducible from one script each.</p>
+<hr>
+<h2>1. Introduction</h2>
+<p><strong>The problem.</strong> An agent edits code, runs the tests, reads the result, edits again. The "reads the result" step is where the tokens go: the JetBrains Research measurement on SWE-agent puts observation tokens at ≈84 % of an average turn [1]; CoACT measures 45.7 % on SWE-bench Verified and 67.8 % on Terminal-Bench [2]; a live Claude Code session had 31 % of its context in tool output [3]. Individual tool calls of 580 k and 948 k tokens have been filed as bugs. An average Claude Code task costs $8.17 and 21.6 M tokens [4]. Anthropic's own documentation tells users to write hooks that filter test output "from tens of thousands of tokens to hundreds".</p>
+<p><strong>The reflex, and why it fails.</strong> Shrink the bytes. RTK — "Rust Token Killer", January 2026, 77 k GitHub stars — rewrites <code>cargo test</code>/<code>pytest</code>/<code>tsc</code> output with regexes before the model sees it, as do at least fifteen clones. Two independent evaluations then found that this does not reduce what people pay: JetBrains (July 2026, 425 trials) measured <strong>+7.6 % cost</strong> and +13.8 % turns [5]; Weinberger &amp; Hozez (2 908 runs) found <strong>r = 0.15</strong> between token reduction and billed cost, with aggressive variants raising cost by 7–48 % [6]. Two mechanisms explain it: 90–97 % of an agent's tokens are prompt-cache reads billed at ~10 %, so bytes are cheap; and an agent that is shown less than it needs spends <em>turns</em> re-discovering it, and turns are expensive.</p>
+<p><strong>What every harness does today.</strong> Claude Code middle-truncates Bash output at 30 000 characters and spills the rest to a file; Codex CLI keeps 256 lines or 10 KiB (head 128 / tail 128); Gemini CLI keeps 40 000 characters and may ask an LLM to summarise; OpenHands, Terminus 2 and mini-SWE-agent cut at 30 000 chars, 10 000 bytes and 10 000 chars. No hosted sandbox (E2B, Modal, Daytona, Vercel, Docker Sandboxes, Kubernetes agent-sandbox, OpenSandbox) shapes output at all; none parses diagnostics, sanitizer reports or test results into structure; none computes what changed between two runs [7].</p>
+<p><strong>Our position.</strong> The executor already knows whether the process exited, was killed or timed out; AddressSanitizer tells it the bug class, the access, the faulting frame and where the object was allocated and freed; the compiler reports file, line, column and code; the test runner reports which tests failed and why. Handing the model 30 KB of interleaved bytes and hoping it finds these facts is a design choice. Once the executor owns the feedback, two things follow: it can be <strong>typed</strong> (a stable schema, rendered identically run after run) and <strong>differential</strong> (because the executor sees consecutive runs it can say what changed — the most actionable sentence after an edit, and one a byte filter cannot compute). Differential feedback forces a systems requirement: a delta is meaningless if addresses move with ASLR, test order with scheduling and messages with locale. So the executor must be <em>hermetic</em> — not as a security nicety but as a precondition for compressible feedback. Anthropic's finding that container configuration alone moves Terminal-Bench scores by 6 pp [8], and Terminal-Bench 2.1's repair of 28/89 tasks for environment drift [9], say the same from the evaluation side.</p>
+<p><strong>Contributions.</strong> (1) <code>sbx</code>: a ~4 k-line Rust executor, no root, documented hermetic profile, self-describing outcomes, 4.6 ms per run. (2) The Verdict/Delta contract and deterministic parsers for ASan/UBSan/LSan/TSan, gcc/clang, rustc, pytest/unittest/cargo test/ctest/gtest/shell check scripts, Python tracebacks and fatal signals. (3) Two controlled micro-experiments (startup latency; run-to-run determinism) and a feedback-form experiment with identical execution and six presentations, on 12 validated C/C++/Rust/Python tasks, with success, turns, tokens and cost per condition. (4) Integration: a Claude Code hook and a harness any executor can adopt.</p>
+<hr>
+<h2>2. Background and related work</h2>
+<p><strong>Execution feedback for repair</strong> is established: Self-Debugging (+12 pp with unit tests), Reflexion (80 → 91 % HumanEval), LDB, CodeAct, SWE-agent's Agent-Computer Interface (18.0 vs 11.0 % shell-only; its ablations show a 100-line file view beats both 30-line and full-file views, and collapsing old observations beats full history by 3 pp) [10]. Gains concentrate in the first 3–4 iterations [11].</p>
+<p><strong>The form of feedback matters at a fixed model.</strong> RustAssistant's prompt-format ablation moved GPT-3.5 from 10.7 to 73.7 % on compile-error repair [12]; VeriHarness reports +42–44 pp from adding {location, observed value, admissible alternatives} to a raw diagnostic [13]; PGS shows a <em>minimal</em> counterexample beats a larger one (+13.2 pp at fewer tokens) [14]; "Generative Compilation" shows fewer, root-cause-focused diagnostics cut compile-error rates [15]. More is not better: the all-facts prompt fixes fewer bugs than the best subset (−8.2 % pass@1) [16]; longer bug reports lower agent success (OR 0.49 per SD) [17]; LLM summaries of observations hide failure signals and lengthen trajectories by 13–15 % [1].</p>
+<p><strong>Sanitizer and crash feedback.</strong> Crash-site repair from regex-distilled ASan reports fixed 358 ARVO bugs for $0.68 [18]; DebugHarness distils sanitizer signatures and lets the agent drive GDB to 89.5 % on SEC-bench — and shows sanitizer reports suffice for spatial bugs while temporal ones need dynamic state [19]; AutoPatchBench shows crash-site plausibility overstates correctness (≈60 % stop the crash, 5–11 % survive differential tests) [20]. None ablates distilled vs full reports on cost.</p>
+<p><strong>Observation compression.</strong> Masking old observations halves cost on SWE-bench and matches or beats LLM summarisation [1]; AgentDiet, ACON, SWE-Pruner(/Pro), CoACT and TACO learn compressors and report −23…−60 % tokens at +0…+4 pp [21]; pruning to the last five tool results raises GPT-5 from 71 to 79 % at a third of the tokens [22]. Negative results exist (minification −12 pp; LLMLingua-2 −7). None of this is <em>semantic structuring by the executor</em>, and none is differential.</p>
+<p><strong>Sandboxes and determinism.</strong> Agent sandboxes are a mature market (Firecracker at E2B/Vercel/Fly; gVisor at Modal/GKE; Docker Sandboxes; K8s agent-sandbox; Anthropic's bubblewrap/Seatbelt runtime; Codex's bubblewrap+Landlock+seccomp; Sandlock, hakoniwa, nono in Rust) [7]; none shapes output, none claims determinism. Deterministic execution exists as research/verification (Hermit, rr, Antithesis) and hermetic builds (Bazel <code>linux-sandbox</code>, Nix) whose mechanisms we borrow. DeltaBox and Crab add snapshot/fork to agent sandboxes and show rollback saving 36 % tokens. "Grounded Scaling" argues k-step agent success degrades as &delta;<sup>k</sup> with environment nondeterminism; and &ldquo;Don&rsquo;t Blindly Trust It&rdquo; (arXiv 2606.21409) shows agents follow <em>corrupted</em> tool feedback into worse-than-no-feedback outcomes (&ldquo;value inversion&rdquo;, even GPT-4o) [23] &mdash; flaky or wrong feedback is actively harmful, not just noisy.</p>
+<p><strong>Position.</strong> The <em>principle</em> that execution feedback should be a typed interface rather than a byte stream is, as of mid-2026, <strong>converging independently</strong> &mdash; VeriHarness [13], &ldquo;AI Coding Agents Need Better Compiler Remarks&rdquo; (precise remarks 3.3&times; success, ambiguous ones actively harmful), RLCSF (&ldquo;compilers already compute the missing signal but expose it for human IDEs, not learning loops&rdquo;), the MCP <code>outputSchema</code>/<code>structuredContent</code> envelope (spec 2025-06-18), and shipping build-diagnostics servers (.NET Binlog MCP, <code>pytest --receptor</code>). We therefore do <strong>not</strong> claim the principle as novel; convergence de-risks it. What a survey of ~100 tools, 15 harnesses and ~130 papers (research report &sect;4; round-2 synthesis) still finds <em>unoccupied</em> is the specific conjunction: (i)&nbsp;a <strong>deterministic, executor-side, no-LLM verdict that unifies compiler + sanitizer/crash + tests</strong> into one machine-readable object &mdash; every prior typed-diagnostic tool covers a single domain, and sanitizer crash-typing (kind/access/first-user-frame/alloc&ndash;free sites) is the rare part; (ii)&nbsp;<strong>diagnostic-level cross-run deltas fed back to the agent as inference-time feedback</strong> &mdash; the nearest work, RLCSF, uses the delta only as an RL reward and never surfaces it; (iii)&nbsp;<strong>determinism as a measured precondition</strong> for those deltas, anchored to &ldquo;Grounded Scaling&rdquo; (k-step success &prop; &delta;<sup>k</sup>) and the &ldquo;Replay Gap&rdquo; (3&thinsp;% of replayed states valid after divergence); and (iv)&nbsp;a <strong>cost-and-turns evaluation of feedback forms on C/C++/Rust with sanitizers</strong>. This work occupies (i)&ndash;(iv); the sandbox primitives, regex filters, LLM summarisation, masking and hook plumbing are integration. We also flag the field&rsquo;s methodological standard that the present arms do <strong>not</strong> yet meet: feedback value should be measured against a <em>matched no-feedback / blind-resampling control at equal budget</em>, since even our weakest arm (<code>raw</code>) still delivers feedback rather than none; adding that control is the priority for the next iteration (&sect;9). The evaluation does already expose the honest scope limit (&sect;6.5): on tasks a strong model fixes from source, the feedback channel is never exercised &mdash; a documented regime (&ldquo;To Run or Not to Run&rdquo;: prohibiting execution costs SOTA agents only 1.25&nbsp;pp), which is why the effect concentrates at the margin of capability.</p>
+<hr>
+<h2>3. Design</h2>
+<p><strong>Three layers, policy separated from mechanism.</strong></p>
+<pre><code> Spec ──▶ hermit-core (mechanism) ──▶ Outcome ──▶ feedback (policy) ──▶ Verdict ──▶ render ──▶ agent
+            clone(2) into namespaces        exit/signal/timeout      parsers: sanitizer,       delta vs
+            tmpfs root + ro host binds      rusage, streams,          compiler, tests,          previous
+            /dev /proc /sys, pivot_root     wall/setup ms,            traceback, signal         Verdict
+            lo up (netlink), rlimits,       Applied{...}
+            no ASLR, no_new_privs,
+            hermetic env, seccomp, exec</code></pre>
+<p><strong>Self-describing outcomes.</strong> Every <code>Outcome</code> carries an <code>Applied</code> record — which namespaces held, whether <code>pivot_root</code>/seccomp/loopback/no-ASLR/fixed-env took effect, which rlimits applied, the cgroup leaf or the reason there is none. Experiments can be filtered by isolation level after the fact instead of trusting a README.</p>
+<p><strong>The hermetic profile</strong> (full table in <code>docs/hermetic-profile.md</code>): fresh user/pid/mount/net/uts/ ipc/cgroup namespaces; tmpfs root with <code>/usr /bin /sbin /lib* /etc /opt</code> bound read-only from the host (lock flags preserved in the remount — the reason read-only binds work without root); <code>/work</code> rw; <code>/tmp</code> tmpfs; minimal <code>/dev</code>; fresh <code>/proc</code> with dangerous entries masked; read-only <code>/sys</code>; <code>pivot_root</code> + detach; loopback UP via a raw <code>RTM_NEWLINK</code>; <code>personality(ADDR_NO_RANDOMIZE)</code>; <code>PR_SET_NO_NEW_PRIVS</code>; RLIMIT CPU/NOFILE/FSIZE/NPROC, CORE=0; environment replaced by a fixed set (<code>LC_ALL=C.UTF-8</code>, <code>TZ=UTC</code>, <code>TERM=dumb</code>, <code>PYTHONHASHSEED=0</code>, <code>SOURCE_DATE_EPOCH</code>, <code>ASAN_OPTIONS</code>, <code>UBSAN_OPTIONS</code>, …); seccomp-bpf denylist (EPERM): <code>io_uring_*</code>, <code>bpf</code>, <code>ptrace</code>, <code>perf_event_open</code>, <code>userfaultfd</code>, key management, module/kexec/reboot/swap, the mount family, <code>unshare</code>/<code>setns</code>, <code>personality</code>, clock setters, <code>socket()</code> for AF_ALG and ~40 exotic families. <code>RLIMIT_AS</code> is off because AddressSanitizer reserves ~20 TB of address space.</p>
+<p><strong>The Verdict</strong> (<code>docs/verdict-schema.md</code>): <code>status</code> with precedence setup-failed &gt; timeout &gt; crash</p>
+<blockquote>build-failed &gt; tests-failed &gt; runtime-error &gt; pass; <code>diagnostics[]</code> {tool, severity, file, line,</blockquote>
+<p>col, code, message}; <code>crash</code> {tool, kind, access, address, frames[] with user/runtime classification, alloc_frames, free_frames, first_user_frame, summary}; <code>tests</code> {runner, passed, failed, errors, failures[]}; <code>tail</code> (≤12 unclaimed lines); <code>raw_bytes</code>; <code>error_groups</code>.</p>
+<p><strong>The Delta.</strong> Diagnostics match on (tool, severity, file, normalised message, |Δline| ≤ 3); tests on name; crashes on (kind, first user frame ± 3 lines) with hex addresses normalised out of the kind. Reported: fixed/new/unchanged, tests fixed/broken/still-failing, crash gone/new/moved/same.</p>
+<p><strong>Rendering</strong> is fixed-order and deterministic: header → delta line → crash block (first user frame, frames user-first, alloc/free sites) → diagnostics errors-first → failing tests → tail → footer with the path of the full log. Python and Rust renderers are kept in parity by test.</p>
+<hr>
+<h2>4. Implementation</h2>
+<p>Rust workspace, 3.7 k lines (<code>hermit-core</code> 1.0 k, <code>feedback</code> 1.7 k, <code>sbx-cli</code> 0.5 k) plus 1.2 k lines of Python harness (<code>bench/agent/{agent,run,analyze,plot}.py</code>). <code>hermit-core</code> uses <code>nix</code> for <code>clone</code>/<code>mount</code>/<code>pivot_root</code>, <code>seccompiler</code> for BPF, raw <code>libc</code> for <code>wait4</code>/<code>personality</code>/netlink. <code>feedback</code> uses <code>regex</code> with ordered, line-claiming parsers (sanitizer → UBSan → compiler → test runner → traceback → signal; unclaimed lines form the tail). <code>sbx run</code> keeps <code>&lt;work&gt;/.sbx/last.json</code> so a re-run prints a delta; <code>sbx verdict --raw - --state DIR</code> distils any log; a Claude Code <code>PostToolUse</code> hook replaces large Bash outputs with the verdict only when structure was found and keeps the raw log on disk. Quality gates: <code>cargo fmt --check</code>, <code>clippy -D warnings</code>, 15 unit + integration tests on real fixtures, a sandbox self-test, an end-to-end ASan verdict + delta test and a hook smoke test in CI. The agent harness drives Claude through the official SDK (manual tool loop, adaptive thinking, effort, caching, server-side refusal fallbacks) or any Ollama model through <code>/api/chat</code> with tool calling (one tool call per turn and bounded nudging for prose-only answers, both recorded).</p>
+<hr>
+<h2>5. Methodology</h2>
+<p><strong>Machine.</strong> Windows 11 host, WSL2 Ubuntu, Linux 6.6.114, 12 logical cores, 7 GB RAM visible to WSL, NVIDIA GTX 1060 3 GB (Ollama in a sibling WSL distro; the 3 B model runs ~50 % on GPU, the 7 B mostly on CPU). No root, no Docker.</p>
+<p><strong>Startup latency</strong> (<code>bench/scripts/startup_bench.sh</code>): <code>/bin/true</code> under plain spawn, sbx full profile, sbx without seccomp/loopback, and bubblewrap with equivalent namespaces and binds; 2 warm-ups, n = 30, wall-clock from Python including the wrapper's own spawn; min/median/p90/mean ± sd.</p>
+<p><strong>Determinism</strong> (<code>bench/scripts/determinism.sh</code>): four sanitizer tasks × three profiles (hermetic; ASLR on; ASLR on + inherited environment) × K = 10 runs; we count distinct sha256 of raw stdout+stderr, distinct crash identities, distinct verdict JSON (wall time removed).</p>
+<p><strong>Feedback-form experiment</strong> (<code>bench/agent/</code>). One episode = task × condition × model × seed. The agent has four tools — <code>read_file</code>, <code>write_file</code>, <code>run</code>, <code>done</code>; <code>run</code> always executes the task's fixed command inside sbx, identically for every condition; only the <em>presentation</em> differs:</p>
+<div class="tbl"><table><thead><tr><th>condition</th><th>presentation</th><th>stands in for</th></tr></thead><tbody><tr><td>raw</td><td>stdout+stderr verbatim + exit line</td><td>OpenHands/E2B-style</td></tr><tr><td>truncate30k</td><td>middle truncation at 30 000 chars</td><td>Claude Code Bash default</td></tr><tr><td>truncate10k</td><td>256 lines or 10 KiB, head 128/tail 128</td><td>Codex CLI default</td></tr><tr><td>regex</td><td>line-level heuristic compressor (drop shadow bytes/legend/deep frames, collapse repeats, cap 8 k)</td><td>RTK-style tools</td></tr><tr><td>structured</td><td>sbx Verdict rendering</td><td>this work, no delta</td></tr><tr><td>structured_delta</td><td>Verdict + Delta vs previous run</td><td>this work</td></tr><tr><td>(orthogonal) mask N</td><td>only last N tool results verbatim</td><td>observation masking [1]</td></tr></tbody></table></div>
+<p>Tasks (12; <code>bench/tasks/</code>): six C (heap overflow, use-after-free, stack overflow, double free, NULL dereference, UBSan signed overflow), one C compile-error task, one C++ (vector OOB), one Rust (index panic, <code>rustc</code> from a read-only-bound toolchain), three Python unittest (exception, interval logic, CLI parsing). Each ships failing and a hidden reference solution; <code>validate_tasks.sh</code> asserts buggy→fail and solution→pass inside sbx (12/12). Raw failing output spans 0.8–36 KB.</p>
+<p><strong>Models.</strong> Claude Opus 5 / Sonnet 5 via the official SDK (adaptive thinking, effort high, prompt caching, server-side refusal fallbacks); open-weight Qwen2.5-Coder 3 B / 7 B through Ollama (zero cost; one tool call per turn and bounded nudging for prose-only answers, both recorded); and any OpenAI-compatible hosted endpoint (<code>openai:&lt;model&gt;</code>) for larger open models when the local GPU is the bottleneck. Measured here: 3 B runs at 28 tok/s generation / 290 tok/s prompt (≈50 % of the model on the 3 GB GPU), 7 B at <strong>10 / 86 tok/s</strong> (≈23 % on GPU) — ≈10 minutes per episode and 8 hours per 48-episode run, which is the practical reason the local arm is small and 32 B-class open models are planned on hosted free tiers.</p>
+<p>Metrics per episode: success (independent sbx re-run + protected-file hashes), API turns, tool calls, nudges, tokens by kind, cache-aware billed cost (public price list), wall-clock, raw bytes produced vs chars shown, per-run status sequence. Wilson 95 % CIs on success; single-run agent evaluations carry 2–6 pp of noise even at temperature 0 [24], so every claim below states n.</p>
+<p><strong>Protocol v2 (after the first 7 B pilot; applied identically to every condition).</strong> Trajectory diagnosis (<code>diagnose.py</code>) showed that 30–38 % of the 7 B model's turns were prose-only or empty (each burning a turn of 15 plus a nudge), that it re-ran <code>run</code> without editing, and that it misread sanitizer vocabulary. v2 therefore (i) bounds <em>tool</em> turns (prose/empty replies are nudged without consuming budget; API calls remain hard-capped); (ii) lets each condition's <code>run</code> tool document its own output — raw/truncated/compressed text for those arms, a four-line legend of the verdict (and of the <code>delta:</code> line) for the typed arms, which is that condition's agent–computer interface rather than extra help; (iii) adds a deterministic one-line <code>hint:</code> glossary for known crash kinds to the typed verdict (e.g. UBSan "insufficient space" → "out-of-bounds access, not an input-parsing problem"); (iv) records the changed line numbers of every edit, giving two finer-grained outcomes when success is at the floor: <strong>edit-hit</strong> (did any edit touch the ground-truth faulting line ± 3) and <strong>progress</strong> (did a later run reach a better status or fewer failing checks than the first). v1 and v2 result sets are kept separate (<code>pilot-&lt;model&gt;.jsonl</code> vs <code>pilot-&lt;model&gt;-v2t20.jsonl</code>).</p>
+<hr>
+<h2>6. Evaluation</h2>
+<h3>6.1 Startup latency (n = 30)</h3>
+<p><em>Figure:</em> <code>bench/out/figs/fig_startup.svg</code>. Idle machine (<code>sbx bench</code>, in-process): sandboxed</p>
+<figure>
+
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="518.4pt" height="230.4pt" viewBox="0 0 518.4 230.4" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-22T14:50:06.302192</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 230.4 
+L 518.4 230.4 
+L 518.4 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 262.02625 186.515312 
+L 417.360851 186.515312 
+L 417.360851 24.777539 
+L 262.02625 24.777539 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_3">
+    <path d="M -122121.957186 32.129256 
+L 269.086914 32.129256 
+L 269.086914 63.083854 
+L -122121.957186 63.083854 
+z
+" clip-path="url(#pa9b3e53c8d)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_4">
+    <path d="M -122121.957186 70.822503 
+L 403.702826 70.822503 
+L 403.702826 101.777101 
+L -122121.957186 101.777101 
+z
+" clip-path="url(#pa9b3e53c8d)" style="fill: #2c6b8c"/>
+   </g>
+   <g id="patch_5">
+    <path d="M -122121.957186 109.515751 
+L 399.3015 109.515751 
+L 399.3015 140.470348 
+L -122121.957186 140.470348 
+z
+" clip-path="url(#pa9b3e53c8d)" style="fill: #2c6b8c"/>
+   </g>
+   <g id="patch_6">
+    <path d="M -122121.957186 148.208998 
+L 391.184679 148.208998 
+L 391.184679 179.163596 
+L -122121.957186 179.163596 
+z
+" clip-path="url(#pa9b3e53c8d)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 275.281437 186.515312 
+L 275.281437 24.777539 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="m1b8393277b" d="M 0 0 
+L 0 3.5 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m1b8393277b" x="275.281437" y="186.515312" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <!-- $\mathdefault{10^{0}}$ -->
+      <g transform="translate(266.481437 202.915312)">
+       <text>
+        <tspan x="0" y="-0.674688" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="6.362305" y="-0.674688" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="12.820312" y="-4.804688" style="font-size: 7px; font-family: 'DejaVu Sans'">0</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 397.678676 186.515312 
+L 397.678676 24.777539 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m1b8393277b" x="397.678676" y="186.515312" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <!-- $\mathdefault{10^{1}}$ -->
+      <g transform="translate(388.878676 202.815313)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="6.362305" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="12.820312" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">1</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <defs>
+       <path id="mf935cd217a" d="M 0 0 
+L 0 2 
+" style="stroke: #000000; stroke-width: 0.6"/>
+      </defs>
+      <g>
+       <use xlink:href="#mf935cd217a" x="263.419919" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#mf935cd217a" x="269.680847" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_7">
+      <g>
+       <use xlink:href="#mf935cd217a" x="312.126677" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#mf935cd217a" x="333.679761" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_7">
+     <g id="line2d_9">
+      <g>
+       <use xlink:href="#mf935cd217a" x="348.971918" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_8">
+     <g id="line2d_10">
+      <g>
+       <use xlink:href="#mf935cd217a" x="360.833436" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_9">
+     <g id="line2d_11">
+      <g>
+       <use xlink:href="#mf935cd217a" x="370.525001" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_10">
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#mf935cd217a" x="378.719104" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_11">
+     <g id="line2d_13">
+      <g>
+       <use xlink:href="#mf935cd217a" x="385.817158" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="xtick_12">
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#mf935cd217a" x="392.078085" y="186.515312" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="text_3">
+     <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle" x="339.693551" y="216.916094" transform="rotate(-0 339.693551 216.916094)">startup latency for /bin/true, ms (median, whisker to p90)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_15">
+      <path d="M 262.02625 47.606555 
+L 417.360851 47.606555 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_16">
+      <defs>
+       <path id="md408b2f90b" d="M 0 0 
+L -3.5 0 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#md408b2f90b" x="262.02625" y="47.606555" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: end" x="255.02625" y="50.835891" transform="rotate(-0 255.02625 50.835891)">plain spawn</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_17">
+      <path d="M 262.02625 86.299802 
+L 417.360851 86.299802 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#md408b2f90b" x="262.02625" y="86.299802" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: end" x="255.02625" y="89.529138" transform="rotate(-0 255.02625 89.529138)">sbx (full: ns+pivot_root+seccomp+lo)</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_19">
+      <path d="M 262.02625 124.993049 
+L 417.360851 124.993049 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#md408b2f90b" x="262.02625" y="124.993049" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: end" x="255.02625" y="128.222385" transform="rotate(-0 255.02625 128.222385)">sbx --no-seccomp --no-loopback</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_21">
+      <path d="M 262.02625 163.686297 
+L 417.360851 163.686297 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_22">
+      <g>
+       <use xlink:href="#md408b2f90b" x="262.02625" y="163.686297" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_7">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: end" x="255.02625" y="166.915633" transform="rotate(-0 255.02625 166.915633)">bubblewrap (unshare-all, ro /usr, tmpfs /tmp, proc, dev)</text>
+     </g>
+    </g>
+   </g>
+   <g id="line2d_23">
+    <path d="M 269.086914 47.606555 
+L 285.414138 47.606555 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #333333; stroke-width: 1.2; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_24">
+    <path d="M 403.702826 86.299802 
+L 410.300188 86.299802 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #333333; stroke-width: 1.2; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_25">
+    <path d="M 399.3015 124.993049 
+L 409.027427 124.993049 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #333333; stroke-width: 1.2; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_26">
+    <path d="M 391.184679 163.686297 
+L 402.454288 163.686297 
+" clip-path="url(#pa9b3e53c8d)" style="fill: none; stroke: #333333; stroke-width: 1.2; stroke-linecap: square"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 262.02625 186.515312 
+L 262.02625 24.777539 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 262.02625 186.515312 
+L 417.360851 186.515312 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: start" x="289.505113" y="49.814563" transform="rotate(-0 289.505113 49.814563)">0.89 ms (p90 1.21)</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: start" x="414.391163" y="88.50781" transform="rotate(-0 414.391163 88.50781)">11.20 ms (p90 12.68)</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: start" x="413.118402" y="127.201057" transform="rotate(-0 413.118402 127.201057)">10.31 ms (p90 12.38)</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: start" x="406.545264" y="165.894304" transform="rotate(-0 406.545264 165.894304)">8.85 ms (p90 10.94)</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 10.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="339.693551" y="18.777539" transform="rotate(-0 339.693551 18.777539)">Sandbox startup latency (this machine)</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pa9b3e53c8d">
+   <rect x="262.02625" y="24.777539" width="155.334601" height="161.737773"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>fig_startup.svg</figcaption></figure>
+<p><code>/bin/true</code> <strong>4.59 ms</strong> median (4.15 without seccomp/loopback), setup→exec 2.0 ms, plain spawn 0.56 ms. Under load (3 B pilot saturating ~5.5 cores; CLI path incl. JSON + verdict):</p>
+<div class="tbl"><table><thead><tr><th>variant</th><th>min</th><th>median</th><th>p90</th><th>mean ± sd</th></tr></thead><tbody><tr><td>plain spawn</td><td>0.68</td><td><strong>0.89</strong></td><td>1.21</td><td>0.94 ± 0.15</td></tr><tr><td>sbx full (ns + pivot_root + mounts + seccomp + lo + verdict)</td><td>9.76</td><td><strong>11.20</strong></td><td>12.68</td><td>11.25 ± 0.96</td></tr><tr><td>sbx --no-seccomp --no-loopback</td><td>7.99</td><td><strong>10.31</strong></td><td>12.38</td><td>10.54 ± 1.61</td></tr><tr><td>bubblewrap (unshare-all, ro /usr, tmpfs /tmp, proc, dev)</td><td>5.91</td><td><strong>8.85</strong></td><td>10.94</td><td>8.92 ± 1.67</td></tr></tbody></table></div>
+<p>sbx's full profile costs ≈ bubblewrap + 2.4 ms (≈0.9 ms seccomp + netlink, the rest JSON/verdict/ state I/O that bubblewrap does not do) and sits 10–50× below <code>docker run</code> (100–500 ms) and gVisor (+40–150 ms) [7]. Wrapping every compile/test call is invisible next to a 150 ms <code>gcc</code> or a multi-second model call.</p>
+<h3>6.2 Determinism (K = 10 per cell)</h3>
+<div class="tbl"><table><thead><tr><th>task</th><th>profile</th><th>distinct raw outputs</th><th>distinct crash identities</th><th>distinct verdicts</th></tr></thead><tbody><tr><td>use-after-free / heap-overflow / stack-strcpy / double-free</td><td><strong>hermetic</strong></td><td><strong>1 / 1 / 1 / 1</strong></td><td>1 / 1 / 1 / 1</td><td>1 / 1 / 1 / 1</td></tr><tr><td>same four</td><td>ASLR on</td><td>10 / 10 / 10 / 10</td><td>1 / 1 / 1 / 1</td><td>10 / 10 / 10 / 10</td></tr><tr><td>same four</td><td>ASLR on + inherited env</td><td>10 / 10 / 10 / 10</td><td>1 / 1 / 1 / 1</td><td>10 / 10 / 10 / 10</td></tr></tbody></table></div>
+<p>Under the hermetic profile the failing output is byte-identical across <strong>40/40</strong> runs; with ASLR every run differs (sanitizer addresses), so any byte- or text-level "what changed" would report 100 % change on an unchanged program. Crash identity is stable under ASLR only <em>after</em> we made it address-free: before that fix, <code>c-heap-overflow</code> showed 10 distinct identities under ASLR because UBSan's "load of address 0x… with insufficient space" carried the address into the kind, and the delta would have said "crash moved" on every re-run. Both lessons stand: identity must be address-free by construction, <em>and</em> the executor should pin ASLR so that everything downstream (messages, addresses an agent might grep) is stable too. Inherited environment costs ~5–10 % wall.</p>
+<h3>6.3 Feedback form, local weak model — Qwen2.5-Coder 3 B (1 seed, ≤ 12 turns, GTX 1060)</h3>
+<p><em>Figures:</em> <code>fig_success_qwen2.5-coder-3b.svg</code>, <code>fig_tokens_qwen2.5-coder-3b.svg</code>,</p>
+<figure>
+
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="518.4pt" height="259.2pt" viewBox="0 0 518.4 259.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-22T14:50:05.570338</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 259.2 
+L 518.4 259.2 
+L 518.4 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 47.962344 219.394687 
+L 507.6 219.394687 
+L 507.6 24.777539 
+L 47.962344 24.777539 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 68.854964 219.394687 
+L 138.497034 219.394687 
+L 138.497034 219.394687 
+L 68.854964 219.394687 
+z
+" clip-path="url(#p6c809eab32)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 184.92508 219.394687 
+L 254.567149 219.394687 
+L 254.567149 206.101166 
+L 184.92508 206.101166 
+z
+" clip-path="url(#p6c809eab32)" style="fill: #5b7a94"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 300.995195 219.394687 
+L 370.637264 219.394687 
+L 370.637264 192.807645 
+L 300.995195 192.807645 
+z
+" clip-path="url(#p6c809eab32)" style="fill: #2c6b8c"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 417.06531 219.394687 
+L 486.707379 219.394687 
+L 486.707379 179.514124 
+L 417.06531 179.514124 
+z
+" clip-path="url(#p6c809eab32)" style="fill: #2e7d4f"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 103.675999 219.394687 
+L 103.675999 24.777539 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="mab4f351981" d="M 0 0 
+L 0 3.5 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#mab4f351981" x="103.675999" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="103.675999" y="232.852695" transform="rotate(-0 103.675999 232.852695)">raw</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 219.746114 219.394687 
+L 219.746114 24.777539 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#mab4f351981" x="219.746114" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(186.730255 233.704189)">truncate 10 KiB</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(203.107364 243.906514)">(Codex)</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 335.816229 219.394687 
+L 335.816229 24.777539 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#mab4f351981" x="335.816229" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(323.623378 233.704189)">typed</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(321.131151 243.906514)">verdict</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 451.886345 219.394687 
+L 451.886345 24.777539 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#mab4f351981" x="451.886345" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(439.693493 233.704189)">typed</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(436.209821 243.906514)">+ delta</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_9">
+      <path d="M 47.962344 219.394687 
+L 507.6 219.394687 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_10">
+      <defs>
+       <path id="m0c0627fb5e" d="M 0 0 
+L -3.5 0 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m0c0627fb5e" x="47.962344" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="223.193516" transform="rotate(-0 40.962344 223.193516)">0.0</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_11">
+      <path d="M 47.962344 187.490237 
+L 507.6 187.490237 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#m0c0627fb5e" x="47.962344" y="187.490237" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="191.289065" transform="rotate(-0 40.962344 191.289065)">0.2</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_13">
+      <path d="M 47.962344 155.585786 
+L 507.6 155.585786 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#m0c0627fb5e" x="47.962344" y="155.585786" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_7">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="159.384614" transform="rotate(-0 40.962344 159.384614)">0.4</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_15">
+      <path d="M 47.962344 123.681336 
+L 507.6 123.681336 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_16">
+      <g>
+       <use xlink:href="#m0c0627fb5e" x="47.962344" y="123.681336" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="127.480164" transform="rotate(-0 40.962344 127.480164)">0.6</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_17">
+      <path d="M 47.962344 91.776885 
+L 507.6 91.776885 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#m0c0627fb5e" x="47.962344" y="91.776885" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_9">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="95.575713" transform="rotate(-0 40.962344 95.575713)">0.8</text>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_19">
+      <path d="M 47.962344 59.872435 
+L 507.6 59.872435 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#m0c0627fb5e" x="47.962344" y="59.872435" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_10">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="63.671263" transform="rotate(-0 40.962344 63.671263)">1.0</text>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_21">
+      <path d="M 47.962344 27.967984 
+L 507.6 27.967984 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_22">
+      <g>
+       <use xlink:href="#m0c0627fb5e" x="47.962344" y="27.967984" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_11">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="31.766812" transform="rotate(-0 40.962344 31.766812)">1.2</text>
+     </g>
+    </g>
+    <g id="text_12">
+     <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle" x="18.656875" y="122.086113" transform="rotate(-90 18.656875 122.086113)">success rate (independent re-run)</text>
+    </g>
+   </g>
+   <g id="LineCollection_1">
+    <path d="M 103.675999 219.394687 
+L 103.675999 180.71042 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #333333"/>
+    <path d="M 219.746114 217.023436 
+L 219.746114 162.942008 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #333333"/>
+    <path d="M 335.816229 211.902861 
+L 335.816229 147.922918 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #333333"/>
+    <path d="M 451.886345 205.206772 
+L 451.886345 134.479343 
+" clip-path="url(#p6c809eab32)" style="fill: none; stroke: #333333"/>
+   </g>
+   <g id="line2d_23">
+    <defs>
+     <path id="mc3a5b6eb44" d="M 4 0 
+L -4 -0 
+" style="stroke: #333333"/>
+    </defs>
+    <g clip-path="url(#p6c809eab32)">
+     <use xlink:href="#mc3a5b6eb44" x="103.675999" y="219.394687" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#mc3a5b6eb44" x="219.746114" y="217.023436" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#mc3a5b6eb44" x="335.816229" y="211.902861" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#mc3a5b6eb44" x="451.886345" y="205.206772" style="fill: #1f77b4; stroke: #333333"/>
+    </g>
+   </g>
+   <g id="line2d_24">
+    <g clip-path="url(#p6c809eab32)">
+     <use xlink:href="#mc3a5b6eb44" x="103.675999" y="180.71042" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#mc3a5b6eb44" x="219.746114" y="162.942008" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#mc3a5b6eb44" x="335.816229" y="147.922918" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#mc3a5b6eb44" x="451.886345" y="134.479343" style="fill: #1f77b4; stroke: #333333"/>
+    </g>
+   </g>
+   <g id="patch_7">
+    <path d="M 47.962344 219.394687 
+L 47.962344 24.777539 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 47.962344 219.394687 
+L 507.6 219.394687 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="103.675999" y="173.882761" transform="rotate(-0 103.675999 173.882761)">0%  (n=12)</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="219.746114" y="156.114348" transform="rotate(-0 219.746114 156.114348)">8%  (n=12)</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="335.816229" y="141.095259" transform="rotate(-0 335.816229 141.095259)">17%  (n=12)</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="451.886345" y="127.651683" transform="rotate(-0 451.886345 127.651683)">25%  (n=12)</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 10.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="277.781172" y="18.777539" transform="rotate(-0 277.781172 18.777539)">Success by feedback condition — qwen2.5-coder-3b (Wilson 95% CI)</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p6c809eab32">
+   <rect x="47.962344" y="24.777539" width="459.637656" height="194.617148"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>fig_success_qwen2.5-coder-3b.svg</figcaption></figure>
+<figure>
+
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="518.4pt" height="259.2pt" viewBox="0 0 518.4 259.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-22T14:50:05.682410</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 259.2 
+L 518.4 259.2 
+L 518.4 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 50.122344 219.394687 
+L 507.6 219.394687 
+L 507.6 24.777539 
+L 50.122344 24.777539 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 107.307051 219.394687 
+L 107.307051 24.777539 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="m19097dad32" d="M 0 0 
+L 0 3.5 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m19097dad32" x="107.307051" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="107.307051" y="232.852695" transform="rotate(-0 107.307051 232.852695)">raw</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 221.676465 219.394687 
+L 221.676465 24.777539 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m19097dad32" x="221.676465" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(188.660605 233.704189)">truncate 10 KiB</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(205.037715 243.906514)">(Codex)</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 336.045879 219.394687 
+L 336.045879 24.777539 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#m19097dad32" x="336.045879" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(323.853027 233.704189)">typed</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(321.360801 243.906514)">verdict</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 450.415293 219.394687 
+L 450.415293 24.777539 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#m19097dad32" x="450.415293" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(438.222441 233.704189)">typed</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(434.73877 243.906514)">+ delta</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_9">
+      <path d="M 50.122344 171.172497 
+L 507.6 171.172497 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_10">
+      <defs>
+       <path id="m3f25b3a140" d="M 0 0 
+L -3.5 0 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m3f25b3a140" x="50.122344" y="171.172497" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <!-- $\mathdefault{10^{4}}$ -->
+      <g transform="translate(25.522344 175.822497)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="6.362305" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="12.820312" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">4</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_11">
+      <path d="M 50.122344 47.503127 
+L 507.6 47.503127 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#m3f25b3a140" x="50.122344" y="47.503127" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <!-- $\mathdefault{10^{5}}$ -->
+      <g transform="translate(25.522344 52.153127)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="6.362305" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="12.820312" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">5</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_13">
+      <defs>
+       <path id="m37cce6cc49" d="M 0 0 
+L -2 0 
+" style="stroke: #000000; stroke-width: 0.6"/>
+      </defs>
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="208.400687" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="198.608392" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_15">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="190.329125" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_16">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="183.157297" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_17">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="176.831297" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_8">
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="133.944307" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_9">
+     <g id="line2d_19">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="112.167212" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="96.716117" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_21">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="84.731317" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_22">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="74.939022" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_13">
+     <g id="line2d_23">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="66.659755" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_14">
+     <g id="line2d_24">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="59.487928" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_15">
+     <g id="line2d_25">
+      <g>
+       <use xlink:href="#m37cce6cc49" x="50.122344" y="53.161927" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="text_7">
+     <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle" x="19.12" y="122.086113" transform="rotate(-90 19.12 122.086113)">input tokens per episode</text>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 78.714697 161.537082 
+L 135.899404 161.537082 
+L 135.899404 73.848904 
+L 78.714697 73.848904 
+L 78.714697 161.537082 
+z
+" clip-path="url(#pa074ebd25c)" style="fill: #9aa4ae; opacity: 0.55; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_26">
+    <path d="M 107.307051 161.537082 
+L 107.307051 210.548453 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_27">
+    <path d="M 107.307051 73.848904 
+L 107.307051 33.623773 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_28">
+    <path d="M 93.010874 210.548453 
+L 121.603228 210.548453 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_29">
+    <path d="M 93.010874 33.623773 
+L 121.603228 33.623773 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 193.084111 171.719072 
+L 250.268818 171.719072 
+L 250.268818 93.712109 
+L 193.084111 93.712109 
+L 193.084111 171.719072 
+z
+" clip-path="url(#pa074ebd25c)" style="fill: #5b7a94; opacity: 0.55; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_30">
+    <path d="M 221.676465 171.719072 
+L 221.676465 210.548453 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_31">
+    <path d="M 221.676465 93.712109 
+L 221.676465 53.111226 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_32">
+    <path d="M 207.380288 210.548453 
+L 235.972642 210.548453 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_33">
+    <path d="M 207.380288 53.111226 
+L 235.972642 53.111226 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 307.453525 170.161601 
+L 364.638232 170.161601 
+L 364.638232 108.225106 
+L 307.453525 108.225106 
+L 307.453525 170.161601 
+z
+" clip-path="url(#pa074ebd25c)" style="fill: #2c6b8c; opacity: 0.55; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_34">
+    <path d="M 336.045879 170.161601 
+L 336.045879 203.841204 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_35">
+    <path d="M 336.045879 108.225106 
+L 336.045879 94.509005 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_36">
+    <path d="M 321.749702 203.841204 
+L 350.342056 203.841204 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_37">
+    <path d="M 321.749702 94.509005 
+L 350.342056 94.509005 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 421.822939 169.800454 
+L 479.007646 169.800454 
+L 479.007646 138.778474 
+L 421.822939 138.778474 
+L 421.822939 169.800454 
+z
+" clip-path="url(#pa074ebd25c)" style="fill: #2e7d4f; opacity: 0.55; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_38">
+    <path d="M 450.415293 169.800454 
+L 450.415293 176.640671 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_39">
+    <path d="M 450.415293 138.778474 
+L 450.415293 121.414451 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_40">
+    <path d="M 436.119116 176.640671 
+L 464.71147 176.640671 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_41">
+    <path d="M 436.119116 121.414451 
+L 464.71147 121.414451 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_42">
+    <path d="M 78.714697 136.226402 
+L 135.899404 136.226402 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #111111"/>
+   </g>
+   <g id="line2d_43">
+    <path d="M 193.084111 148.133853 
+L 250.268818 148.133853 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #111111"/>
+   </g>
+   <g id="line2d_44">
+    <path d="M 307.453525 155.417466 
+L 364.638232 155.417466 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #111111"/>
+   </g>
+   <g id="line2d_45">
+    <path d="M 421.822939 153.580697 
+L 479.007646 153.580697 
+" clip-path="url(#pa074ebd25c)" style="fill: none; stroke: #111111"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 50.122344 219.394687 
+L 50.122344 24.777539 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 50.122344 219.394687 
+L 507.6 219.394687 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="PathCollection_1">
+    <defs>
+     <path id="m6f12fbe0f4" d="M 0 1.732051 
+C 0.459345 1.732051 0.899939 1.549551 1.224745 1.224745 
+C 1.549551 0.899939 1.732051 0.459345 1.732051 0 
+C 1.732051 -0.459345 1.549551 -0.899939 1.224745 -1.224745 
+C 0.899939 -1.549551 0.459345 -1.732051 0 -1.732051 
+C -0.459345 -1.732051 -0.899939 -1.549551 -1.224745 -1.224745 
+C -1.549551 -0.899939 -1.732051 -0.459345 -1.732051 0 
+C -1.732051 0.459345 -1.549551 0.899939 -1.224745 1.224745 
+C -0.899939 1.549551 -0.459345 1.732051 0 1.732051 
+z
+" style="stroke: #222222; stroke-opacity: 0.7"/>
+    </defs>
+    <g clip-path="url(#pa074ebd25c)">
+     <use xlink:href="#m6f12fbe0f4" x="98.157498" y="59.137281" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="102.732274" y="44.563403" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="107.307051" y="173.780613" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="111.881827" y="79.808951" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="116.456604" y="33.623773" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="98.157498" y="210.548453" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="102.732274" y="158.006299" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="107.307051" y="146.303012" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="111.881827" y="107.350148" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="116.456604" y="202.71826" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="98.157498" y="127.744971" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="102.732274" y="150.029313" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+    </g>
+   </g>
+   <g id="PathCollection_2">
+    <g clip-path="url(#pa074ebd25c)">
+     <use xlink:href="#m6f12fbe0f4" x="212.526912" y="66.080532" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="217.101688" y="44.563403" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="221.676465" y="173.780613" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="226.251241" y="171.049108" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="230.826018" y="53.111226" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="212.526912" y="210.548453" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="217.101688" y="158.006299" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="221.676465" y="146.303012" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="226.251241" y="107.350148" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="230.826018" y="202.71826" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="212.526912" y="127.744971" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="217.101688" y="150.029313" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+    </g>
+   </g>
+   <g id="PathCollection_3">
+    <g clip-path="url(#pa074ebd25c)">
+     <use xlink:href="#m6f12fbe0f4" x="326.896326" y="160.532067" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="331.471102" y="94.509005" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="336.045879" y="151.763494" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="340.620655" y="176.873087" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="345.195432" y="154.107765" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="326.896326" y="100.758385" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="331.471102" y="171.603896" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="336.045879" y="106.09324" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="340.620655" y="156.759904" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="345.195432" y="108.954957" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="326.896326" y="203.841204" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="331.471102" y="169.689316" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+    </g>
+   </g>
+   <g id="PathCollection_4">
+    <g clip-path="url(#pa074ebd25c)">
+     <use xlink:href="#m6f12fbe0f4" x="441.26574" y="158.330927" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="445.840516" y="103.649089" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="450.415293" y="150.813985" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="454.99007" y="173.99529" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="459.564846" y="176.640671" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="441.26574" y="98.658843" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="445.840516" y="171.253121" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="450.415293" y="147.399185" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="454.99007" y="156.497709" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="459.564846" y="146.08711" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="441.26574" y="121.414451" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m6f12fbe0f4" x="445.840516" y="169.324833" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+    </g>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 10.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="278.861172" y="18.777539" transform="rotate(-0 278.861172 18.777539)">Input tokens per episode — qwen2.5-coder-3b</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pa074ebd25c">
+   <rect x="50.122344" y="24.777539" width="457.477656" height="194.617148"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>fig_tokens_qwen2.5-coder-3b.svg</figcaption></figure>
+<p><code>fig_turns_qwen2.5-coder-3b.svg</code>, <code>fig_shown_vs_raw_qwen2.5-coder-3b.svg</code>, <code>fig_task_matrix_qwen2.5-coder-3b.svg</code>. Final: 48 episodes (12 tasks × 4 conditions, 1 seed).</p>
+<div class="tbl"><table><thead><tr><th>condition</th><th>n</th><th>success</th><th>95 % CI</th><th>turns</th><th><code>run</code> calls</th><th>input tokens</th><th>wall s</th><th>shown/raw</th></tr></thead><tbody><tr><td>raw</td><td>12</td><td><strong>0/12</strong></td><td>0–24 %</td><td>9.9</td><td>4.1</td><td>40 756</td><td>435</td><td>1.01</td></tr><tr><td>truncate10k (Codex)</td><td>12</td><td>1/12</td><td>1–35 %</td><td>9.6</td><td>4.0</td><td>32 928</td><td>367</td><td>0.96</td></tr><tr><td>typed verdict</td><td>12</td><td>2/12</td><td>5–45 %</td><td>9.3</td><td>3.7</td><td>19 351</td><td>306</td><td>0.94</td></tr><tr><td><strong>typed + delta</strong></td><td>12</td><td><strong>3/12</strong></td><td>9–53 %</td><td>9.4</td><td>3.8</td><td><strong>17 485</strong></td><td><strong>290</strong></td><td>1.27</td></tr></tbody></table></div>
+<p>Solved (turns): compile-error — typed ✓8, typed+delta ✓8; double-free — typed+delta ✓10; signed-overflow — trunc ✓8, typed ✓8, typed+delta ✓8. Everything else failed in every condition (nine tasks: the 3 B model never produced a correct fix within 12 turns, whatever it was shown).</p>
+<p>Reading. With a 3 B model the predicted direction holds on every axis — success 0 → 3 of 12, input tokens ÷2.3, wall ÷1.5 — and the per-episode scatter (<code>fig_shown_vs_raw</code>) shows <em>why</em> it is not a byte effect: on small-output tasks the verdict is as long as the raw output (shown/raw ≈ 1), yet typed conditions still win; on the 17–36 KB tasks the verdict stays at ~1 k chars while raw grows to 10⁵ and the model simply never finds the faulting line. Typed + delta calls <code>done</code> in 3/12 episodes versus 0/12 for raw — raw episodes end at the turn cap without the model ever believing it is done. The CIs overlap (Wilson 95 %: raw 0–24 %, typed+delta 9–53 %); this is a directional signal, not a result, and the floor is low: nine of twelve tasks are simply beyond a 3 B model in 12 turns.</p>
+<h3>6.4 Feedback form, local model — Qwen2.5-Coder 7 B (1 seed, ≤ 15 turns; ≈ 23 % of the model on GPU)</h3>
+<p><em>Figures:</em> <code>fig_success_qwen2.5-coder-7b.svg</code>, <code>fig_tokens_qwen2.5-coder-7b.svg</code>,</p>
+<figure>
+
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="518.4pt" height="259.2pt" viewBox="0 0 518.4 259.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-22T11:41:50.218920</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 259.2 
+L 518.4 259.2 
+L 518.4 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 47.962344 219.394687 
+L 507.6 219.394687 
+L 507.6 24.777539 
+L 47.962344 24.777539 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 68.854964 219.394687 
+L 138.497034 219.394687 
+L 138.497034 190.390642 
+L 68.854964 190.390642 
+z
+" clip-path="url(#p1ed5320db6)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 184.92508 219.394687 
+L 254.567149 219.394687 
+L 254.567149 190.390642 
+L 184.92508 190.390642 
+z
+" clip-path="url(#p1ed5320db6)" style="fill: #5b7a94"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 300.995195 219.394687 
+L 370.637264 219.394687 
+L 370.637264 190.390642 
+L 300.995195 190.390642 
+z
+" clip-path="url(#p1ed5320db6)" style="fill: #2c6b8c"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 417.06531 219.394687 
+L 486.707379 219.394687 
+L 486.707379 204.892665 
+L 417.06531 204.892665 
+z
+" clip-path="url(#p1ed5320db6)" style="fill: #2e7d4f"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 103.675999 219.394687 
+L 103.675999 24.777539 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="ma77f2ef4a9" d="M 0 0 
+L 0 3.5 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#ma77f2ef4a9" x="103.675999" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="103.675999" y="232.852695" transform="rotate(-0 103.675999 232.852695)">raw</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 219.746114 219.394687 
+L 219.746114 24.777539 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#ma77f2ef4a9" x="219.746114" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(186.730255 233.704189)">truncate 10 KiB</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(203.107364 243.906514)">(Codex)</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 335.816229 219.394687 
+L 335.816229 24.777539 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#ma77f2ef4a9" x="335.816229" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(323.623378 233.704189)">typed</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(321.131151 243.906514)">verdict</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 451.886345 219.394687 
+L 451.886345 24.777539 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#ma77f2ef4a9" x="451.886345" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(439.693493 233.704189)">typed</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(436.209821 243.906514)">+ delta</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_9">
+      <path d="M 47.962344 219.394687 
+L 507.6 219.394687 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_10">
+      <defs>
+       <path id="m0bde4c97da" d="M 0 0 
+L -3.5 0 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m0bde4c97da" x="47.962344" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="223.193516" transform="rotate(-0 40.962344 223.193516)">0.0</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_11">
+      <path d="M 47.962344 187.490237 
+L 507.6 187.490237 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#m0bde4c97da" x="47.962344" y="187.490237" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="191.289065" transform="rotate(-0 40.962344 191.289065)">0.2</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_13">
+      <path d="M 47.962344 155.585786 
+L 507.6 155.585786 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#m0bde4c97da" x="47.962344" y="155.585786" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_7">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="159.384614" transform="rotate(-0 40.962344 159.384614)">0.4</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_15">
+      <path d="M 47.962344 123.681336 
+L 507.6 123.681336 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_16">
+      <g>
+       <use xlink:href="#m0bde4c97da" x="47.962344" y="123.681336" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="127.480164" transform="rotate(-0 40.962344 127.480164)">0.6</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_17">
+      <path d="M 47.962344 91.776885 
+L 507.6 91.776885 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#m0bde4c97da" x="47.962344" y="91.776885" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_9">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="95.575713" transform="rotate(-0 40.962344 95.575713)">0.8</text>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_19">
+      <path d="M 47.962344 59.872435 
+L 507.6 59.872435 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#m0bde4c97da" x="47.962344" y="59.872435" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_10">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="63.671263" transform="rotate(-0 40.962344 63.671263)">1.0</text>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_21">
+      <path d="M 47.962344 27.967984 
+L 507.6 27.967984 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_22">
+      <g>
+       <use xlink:href="#m0bde4c97da" x="47.962344" y="27.967984" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_11">
+      <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end" x="40.962344" y="31.766812" transform="rotate(-0 40.962344 31.766812)">1.2</text>
+     </g>
+    </g>
+    <g id="text_12">
+     <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle" x="18.656875" y="122.086113" transform="rotate(-90 18.656875 122.086113)">success rate (independent re-run)</text>
+    </g>
+   </g>
+   <g id="LineCollection_1">
+    <path d="M 103.675999 211.200572 
+L 103.675999 143.304784 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #333333"/>
+    <path d="M 219.746114 211.200572 
+L 219.746114 143.304784 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #333333"/>
+    <path d="M 335.816229 211.200572 
+L 335.816229 143.304784 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #333333"/>
+    <path d="M 451.886345 216.805362 
+L 451.886345 159.196632 
+" clip-path="url(#p1ed5320db6)" style="fill: none; stroke: #333333"/>
+   </g>
+   <g id="line2d_23">
+    <defs>
+     <path id="m198f9d7497" d="M 4 0 
+L -4 -0 
+" style="stroke: #333333"/>
+    </defs>
+    <g clip-path="url(#p1ed5320db6)">
+     <use xlink:href="#m198f9d7497" x="103.675999" y="211.200572" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#m198f9d7497" x="219.746114" y="211.200572" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#m198f9d7497" x="335.816229" y="211.200572" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#m198f9d7497" x="451.886345" y="216.805362" style="fill: #1f77b4; stroke: #333333"/>
+    </g>
+   </g>
+   <g id="line2d_24">
+    <g clip-path="url(#p1ed5320db6)">
+     <use xlink:href="#m198f9d7497" x="103.675999" y="143.304784" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#m198f9d7497" x="219.746114" y="143.304784" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#m198f9d7497" x="335.816229" y="143.304784" style="fill: #1f77b4; stroke: #333333"/>
+     <use xlink:href="#m198f9d7497" x="451.886345" y="159.196632" style="fill: #1f77b4; stroke: #333333"/>
+    </g>
+   </g>
+   <g id="patch_7">
+    <path d="M 47.962344 219.394687 
+L 47.962344 24.777539 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 47.962344 219.394687 
+L 507.6 219.394687 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="103.675999" y="136.477124" transform="rotate(-0 103.675999 136.477124)">18%  (n=11)</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="219.746114" y="136.477124" transform="rotate(-0 219.746114 136.477124)">18%  (n=11)</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="335.816229" y="136.477124" transform="rotate(-0 335.816229 136.477124)">18%  (n=11)</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="451.886345" y="152.368973" transform="rotate(-0 451.886345 152.368973)">9%  (n=11)</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 10.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="277.781172" y="18.777539" transform="rotate(-0 277.781172 18.777539)">Success by feedback condition — qwen2.5-coder-7b (Wilson 95% CI)</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p1ed5320db6">
+   <rect x="47.962344" y="24.777539" width="459.637656" height="194.617148"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>fig_success_qwen2.5-coder-7b.svg</figcaption></figure>
+<figure>
+
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="518.4pt" height="259.2pt" viewBox="0 0 518.4 259.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-22T11:41:50.390449</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 259.2 
+L 518.4 259.2 
+L 518.4 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 67.242344 219.394687 
+L 507.6 219.394687 
+L 507.6 24.777539 
+L 67.242344 24.777539 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 122.287051 219.394687 
+L 122.287051 24.777539 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="mda9bf89d10" d="M 0 0 
+L 0 3.5 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#mda9bf89d10" x="122.287051" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="122.287051" y="232.852695" transform="rotate(-0 122.287051 232.852695)">raw</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 232.376465 219.394687 
+L 232.376465 24.777539 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#mda9bf89d10" x="232.376465" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(199.360605 233.704189)">truncate 10 KiB</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(215.737715 243.906514)">(Codex)</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 342.465879 219.394687 
+L 342.465879 24.777539 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#mda9bf89d10" x="342.465879" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(330.273027 233.704189)">typed</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(327.780801 243.906514)">verdict</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 452.555293 219.394687 
+L 452.555293 24.777539 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#mda9bf89d10" x="452.555293" y="219.394687" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(440.362441 233.704189)">typed</text>
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(436.87877 243.906514)">+ delta</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_9">
+      <path d="M 67.242344 169.28767 
+L 507.6 169.28767 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #b0b0b0; stroke-opacity: 0.25; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_10">
+      <defs>
+       <path id="m00cec1172b" d="M 0 0 
+L -3.5 0 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m00cec1172b" x="67.242344" y="169.28767" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <!-- $\mathdefault{10^{4}}$ -->
+      <g transform="translate(42.642344 173.93767)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="6.362305" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="12.820312" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">4</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_11">
+      <defs>
+       <path id="m1a3ca75052" d="M 0 0 
+L -2 0 
+" style="stroke: #000000; stroke-width: 0.6"/>
+      </defs>
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="215.632212" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="203.442003" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <!-- $\mathdefault{6\times10^{3}}$ -->
+      <g transform="translate(25.642344 208.142003)">
+       <text>
+        <tspan x="0" y="-0.674688" style="font-size: 10px; font-family: 'DejaVu Sans'">6</tspan>
+        <tspan x="8.310547" y="-0.674688" style="font-size: 10px; font-family: 'DejaVu Sans'">×</tspan>
+        <tspan x="18.637695" y="-0.674688" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="25" y="-0.674688" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="31.458008" y="-4.804688" style="font-size: 7px; font-family: 'DejaVu Sans'">3</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_13">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="193.135328" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="184.20728" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_15">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="176.332184" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_16">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="122.943129" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_7">
+      <!-- $\mathdefault{2\times10^{4}}$ -->
+      <g transform="translate(25.642344 127.593129)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">2</tspan>
+        <tspan x="8.310547" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">×</tspan>
+        <tspan x="18.637695" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="25" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="31.458008" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">4</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_8">
+     <g id="line2d_17">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="95.83331" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <!-- $\mathdefault{3\times10^{4}}$ -->
+      <g transform="translate(25.642344 100.48331)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">3</tspan>
+        <tspan x="8.310547" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">×</tspan>
+        <tspan x="18.637695" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="25" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="31.458008" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">4</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_9">
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="76.598588" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_9">
+      <!-- $\mathdefault{4\times10^{4}}$ -->
+      <g transform="translate(25.642344 81.248588)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">4</tspan>
+        <tspan x="8.310547" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">×</tspan>
+        <tspan x="18.637695" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="25" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="31.458008" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">4</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_19">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="61.678978" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="49.488769" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+     <g id="text_10">
+      <!-- $\mathdefault{6\times10^{4}}$ -->
+      <g transform="translate(25.642344 54.138769)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">6</tspan>
+        <tspan x="8.310547" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">×</tspan>
+        <tspan x="18.637695" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="25" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="31.458008" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">4</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_21">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="39.182094" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_13">
+     <g id="line2d_22">
+      <g>
+       <use xlink:href="#m1a3ca75052" x="67.242344" y="30.254046" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="text_11">
+     <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle" x="19.24" y="122.086113" transform="rotate(-90 19.24 122.086113)">input tokens per episode</text>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 94.764697 169.180778 
+L 149.809404 169.180778 
+L 149.809404 92.726277 
+L 94.764697 92.726277 
+L 94.764697 169.180778 
+z
+" clip-path="url(#p7597a191c7)" style="fill: #9aa4ae; opacity: 0.55; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_23">
+    <path d="M 122.287051 169.180778 
+L 122.287051 210.548453 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_24">
+    <path d="M 122.287051 92.726277 
+L 122.287051 74.317855 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_25">
+    <path d="M 108.525874 210.548453 
+L 136.048228 210.548453 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_26">
+    <path d="M 108.525874 74.317855 
+L 136.048228 74.317855 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 204.854111 158.502269 
+L 259.898818 158.502269 
+L 259.898818 100.578905 
+L 204.854111 100.578905 
+L 204.854111 158.502269 
+z
+" clip-path="url(#p7597a191c7)" style="fill: #5b7a94; opacity: 0.55; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_27">
+    <path d="M 232.376465 158.502269 
+L 232.376465 194.155539 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_28">
+    <path d="M 232.376465 100.578905 
+L 232.376465 87.54151 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_29">
+    <path d="M 218.615288 194.155539 
+L 246.137642 194.155539 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_30">
+    <path d="M 218.615288 87.54151 
+L 246.137642 87.54151 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 314.943525 170.277823 
+L 369.988232 170.277823 
+L 369.988232 107.903277 
+L 314.943525 107.903277 
+L 314.943525 170.277823 
+z
+" clip-path="url(#p7597a191c7)" style="fill: #2c6b8c; opacity: 0.55; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_31">
+    <path d="M 342.465879 170.277823 
+L 342.465879 187.883588 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_32">
+    <path d="M 342.465879 107.903277 
+L 342.465879 94.195384 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_33">
+    <path d="M 328.704702 187.883588 
+L 356.227056 187.883588 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_34">
+    <path d="M 328.704702 94.195384 
+L 356.227056 94.195384 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 425.032939 169.986666 
+L 480.077646 169.986666 
+L 480.077646 109.992537 
+L 425.032939 109.992537 
+L 425.032939 169.986666 
+z
+" clip-path="url(#p7597a191c7)" style="fill: #2e7d4f; opacity: 0.55; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_35">
+    <path d="M 452.555293 169.986666 
+L 452.555293 207.413295 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_36">
+    <path d="M 452.555293 109.992537 
+L 452.555293 90.495974 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_37">
+    <path d="M 438.794116 207.413295 
+L 466.31647 207.413295 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_38">
+    <path d="M 438.794116 90.495974 
+L 466.31647 90.495974 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #000000; stroke-linecap: square"/>
+   </g>
+   <g id="line2d_39">
+    <path d="M 94.764697 112.166264 
+L 149.809404 112.166264 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #111111"/>
+   </g>
+   <g id="line2d_40">
+    <path d="M 204.854111 142.566775 
+L 259.898818 142.566775 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #111111"/>
+   </g>
+   <g id="line2d_41">
+    <path d="M 314.943525 139.994118 
+L 369.988232 139.994118 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #111111"/>
+   </g>
+   <g id="line2d_42">
+    <path d="M 425.032939 134.76794 
+L 480.077646 134.76794 
+" clip-path="url(#p7597a191c7)" style="fill: none; stroke: #111111"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 67.242344 219.394687 
+L 67.242344 24.777539 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 67.242344 219.394687 
+L 507.6 219.394687 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="PathCollection_1">
+    <defs>
+     <path id="m99ab6e3213" d="M 0 1.732051 
+C 0.459345 1.732051 0.899939 1.549551 1.224745 1.224745 
+C 1.549551 0.899939 1.732051 0.459345 1.732051 0 
+C 1.732051 -0.459345 1.549551 -0.899939 1.224745 -1.224745 
+C 0.899939 -1.549551 0.459345 -1.732051 0 -1.732051 
+C -0.459345 -1.732051 -0.899939 -1.549551 -1.224745 -1.224745 
+C -1.549551 -0.899939 -1.732051 -0.459345 -1.732051 0 
+C -1.732051 0.459345 -1.549551 0.899939 -1.224745 1.224745 
+C -0.899939 1.549551 -0.459345 1.732051 0 1.732051 
+z
+" style="stroke: #222222; stroke-opacity: 0.7"/>
+    </defs>
+    <g clip-path="url(#p7597a191c7)">
+     <use xlink:href="#m99ab6e3213" x="113.479898" y="166.319068" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="117.883474" y="106.497905" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="122.287051" y="112.166264" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="126.690627" y="90.395222" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="131.094204" y="172.17047" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="113.479898" y="95.141546" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="117.883474" y="33.623773" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="122.287051" y="124.673631" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="126.690627" y="74.317855" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="131.094204" y="210.548453" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="113.479898" y="194.155539" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+    </g>
+   </g>
+   <g id="PathCollection_2">
+    <g clip-path="url(#p7597a191c7)">
+     <use xlink:href="#m99ab6e3213" x="223.569312" y="166.319068" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="227.972888" y="106.497905" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="232.376465" y="112.166264" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="236.780041" y="90.395222" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="241.183618" y="172.17047" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="223.569312" y="95.141546" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="227.972888" y="142.566775" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="232.376465" y="87.54151" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="236.780041" y="151.50443" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="241.183618" y="148.39056" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="223.569312" y="194.155539" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+    </g>
+   </g>
+   <g id="PathCollection_3">
+    <g clip-path="url(#p7597a191c7)">
+     <use xlink:href="#m99ab6e3213" x="333.658726" y="168.75491" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="338.062302" y="57.345481" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="342.465879" y="146.481079" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="346.869455" y="139.994118" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="351.273032" y="186.131899" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="333.658726" y="125.166031" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="338.062302" y="94.195384" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="342.465879" y="56.875893" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="346.869455" y="171.836234" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="351.273032" y="137.637463" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="333.658726" y="187.883588" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+    </g>
+   </g>
+   <g id="PathCollection_4">
+    <g clip-path="url(#p7597a191c7)">
+     <use xlink:href="#m99ab6e3213" x="443.74814" y="168.186889" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="448.151716" y="90.495974" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="452.555293" y="143.360547" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="456.95887" y="96.177414" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="461.362446" y="186.131899" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="443.74814" y="134.199819" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="448.151716" y="127.42605" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="452.555293" y="67.299033" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="456.95887" y="171.836234" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="461.362446" y="134.76794" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+     <use xlink:href="#m99ab6e3213" x="443.74814" y="207.413295" style="fill: #222222; fill-opacity: 0.7; stroke: #222222; stroke-opacity: 0.7"/>
+    </g>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 10.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="287.421172" y="18.777539" transform="rotate(-0 287.421172 18.777539)">Input tokens per episode — qwen2.5-coder-7b</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p7597a191c7">
+   <rect x="67.242344" y="24.777539" width="440.357656" height="194.617148"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>fig_tokens_qwen2.5-coder-7b.svg</figcaption></figure>
+<p><code>fig_turns_qwen2.5-coder-7b.svg</code>, <code>fig_shown_vs_raw_qwen2.5-coder-7b.svg</code>, <code>fig_task_matrix_qwen2.5-coder-7b.svg</code>. 44/48 episodes at the time of writing (the remaining four are the Rust task); ≈ 10 min per episode.</p>
+<div class="tbl"><table><thead><tr><th>condition</th><th>n</th><th>success</th><th>95 % CI</th><th>turns</th><th><code>run</code> calls</th><th>nudges</th><th>input tokens</th><th>wall s</th><th>shown/raw</th></tr></thead><tbody><tr><td>raw</td><td>11</td><td>2/11</td><td>5–48 %</td><td>7.6</td><td>2.7</td><td>1.9</td><td>25 563</td><td>528</td><td>1.01</td></tr><tr><td>truncate10k (Codex)</td><td>11</td><td>2/11</td><td>5–48 %</td><td>7.5</td><td>2.8</td><td>1.7</td><td>19 495</td><td>639</td><td>1.01</td></tr><tr><td>typed verdict</td><td>11</td><td>2/11</td><td>5–48 %</td><td>9.4</td><td>3.5</td><td>1.8</td><td>21 621</td><td>719</td><td>0.41</td></tr><tr><td>typed + delta</td><td>10</td><td>1/10</td><td>2–40 %</td><td>9.1</td><td>3.2</td><td>1.9</td><td>20 297</td><td>570</td><td>0.42</td></tr></tbody></table></div>
+<p>Only two tasks were solved at all (compile-error in every condition at 7 turns; null-deref in three of four). <strong>No effect of feedback form is visible at 7 B in this budget</strong> — a null result with the same n as the 3 B arm, and an important one: success is at the floor (≤ 18 %) in every condition, so the presentation cannot move it, and the token/wall differences shrink because the 7 B model reads the raw output in fewer turns (7.6 vs 9.4). Two confounds are visible in the bookkeeping: ~1.9 nudges per episode (the model answers in prose roughly every fourth turn, each nudge burning a turn of the 15) and <code>done</code> called in only 2–3 of 11 episodes — most episodes end at the cap. We therefore queue a second 7 B run with a 20-turn budget and the parser fixes from §6.6 (check-script failures now carry expected/got; Rust panics parsed) — <code>pilot-qwen2.5-coder_7b-v2t20</code> — and report it when done. Until then the honest summary of the local arm is: <em>directional gain at 3 B, null at 7 B, both with n = 10–12 and wide intervals; the frontier arm decides.</em></p>
+<h3>6.5 Frontier model — Claude (via the Claude Code CLI, no API key)</h3>
+<p>The Claude arm runs without an API key by driving the Claude Code CLI (<code>claude.exe</code>, OAuth login) turn-by-turn as the model: built-in tools disabled, the model emits our tool-call JSON as text, the harness parses and executes it in sbx (<code>ClaudeCLIModel</code>; native Windows Python so <code>--resume</code> works, sbx reached through the WSL bridge). Costs are the CLI's own <code>total_cost_usd</code>.</p>
+<p><strong>A first run exposed a confound, not a result.</strong> Claude Sonnet 4.6 solved all 6 memory tasks in every condition in 4 turns — but with <strong><code>raw_bytes ≈ 100</code> and first-run status = <code>pass</code> in 12/12 episodes</strong>: the model read the source, fixed the bug, and only <em>then</em> ran the tests (which passed). It never executed the buggy code, so the raw-vs-typed feedback was never delivered. On tasks a capable model can fix by reading a short single file, execution feedback — in any form — is simply unused. (The weak model could not fix from source, which is exactly why the 3 B arm <em>did</em> show an effect.) This is a real finding about <em>when</em> feedback matters, and a lesson for the experiment: the feedback must actually be delivered.</p>
+<p><strong>Control — force the buggy run (<code>--run-before-edit</code>).</strong> The harness rejects the first <code>write_file</code> until <code>run</code> has executed once, so the buggy-code feedback is in context before any edit (a fair, documented constraint identical across conditions). Claude Sonnet 4.6, 6 memory tasks × 2 conditions, 1 seed, <code>ran_buggy_first = 6/6</code> in both:</p>
+<div class="tbl"><table><thead><tr><th>condition</th><th>n</th><th>success</th><th>turns</th><th>chars shown</th><th>raw bytes</th><th>shown/raw</th><th>cost</th></tr></thead><tbody><tr><td>raw</td><td>6</td><td><strong>6/6</strong></td><td>6.0</td><td><strong>11,541</strong></td><td>11,513</td><td>1.00</td><td>$0.40</td></tr><tr><td>structured_delta</td><td>6</td><td><strong>6/6</strong></td><td>6.2</td><td><strong>1,740</strong></td><td>12,248</td><td><strong>0.14</strong></td><td>$0.44</td></tr></tbody></table></div>
+<p><em>Figure:</em> <code>fig_sonnet_rbe.svg</code>. Per task, <code>shown_raw → shown_typed</code>: heap-overflow 981→1,199 (already</p>
+<figure>
+
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="576pt" height="288pt" viewBox="0 0 576 288" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-22T14:50:33.008330</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 288 
+L 576 288 
+L 576 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 50.122344 240.418976 
+L 565.2 240.418976 
+L 565.2 24.777539 
+L 50.122344 24.777539 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 73.534964 125607.758742 
+L 105.828234 125607.758742 
+L 105.828234 147.537372 
+L 73.534964 147.537372 
+z
+" clip-path="url(#p450241296a)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 154.268139 125607.758742 
+L 186.561409 125607.758742 
+L 186.561409 230.617093 
+L 154.268139 230.617093 
+z
+" clip-path="url(#p450241296a)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 235.001314 125607.758742 
+L 267.294584 125607.758742 
+L 267.294584 159.585587 
+L 235.001314 159.585587 
+z
+" clip-path="url(#p450241296a)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 315.734489 125607.758742 
+L 348.027759 125607.758742 
+L 348.027759 133.641667 
+L 315.734489 133.641667 
+z
+" clip-path="url(#p450241296a)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 396.467664 125607.758742 
+L 428.760934 125607.758742 
+L 428.760934 72.81668 
+L 396.467664 72.81668 
+z
+" clip-path="url(#p450241296a)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 477.200839 125607.758742 
+L 509.494109 125607.758742 
+L 509.494109 34.579423 
+L 477.200839 34.579423 
+z
+" clip-path="url(#p450241296a)" style="fill: #9aa4ae"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 105.828234 125607.758742 
+L 138.121504 125607.758742 
+L 138.121504 164.661188 
+L 105.828234 164.661188 
+z
+" clip-path="url(#p450241296a)" style="fill: #2e7d4f"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 186.561409 125607.758742 
+L 218.854679 125607.758742 
+L 218.854679 219.723044 
+L 186.561409 219.723044 
+z
+" clip-path="url(#p450241296a)" style="fill: #2e7d4f"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 267.294584 125607.758742 
+L 299.587854 125607.758742 
+L 299.587854 215.793728 
+L 267.294584 215.793728 
+z
+" clip-path="url(#p450241296a)" style="fill: #2e7d4f"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 348.027759 125607.758742 
+L 380.321029 125607.758742 
+L 380.321029 215.541615 
+L 348.027759 215.541615 
+z
+" clip-path="url(#p450241296a)" style="fill: #2e7d4f"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 428.760934 125607.758742 
+L 461.054204 125607.758742 
+L 461.054204 207.02354 
+L 428.760934 207.02354 
+z
+" clip-path="url(#p450241296a)" style="fill: #2e7d4f"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 509.494109 125607.758742 
+L 541.787379 125607.758742 
+L 541.787379 196.59077 
+L 509.494109 196.59077 
+z
+" clip-path="url(#p450241296a)" style="fill: #2e7d4f"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <defs>
+       <path id="mb1074ebe63" d="M 0 0 
+L 0 3.5 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#mb1074ebe63" x="105.828234" y="240.418976" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(59.274741 270.178031) rotate(-20)">double-free</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2">
+      <g>
+       <use xlink:href="#mb1074ebe63" x="186.561409" y="240.418976" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(128.627137 274.320295) rotate(-20)">heap-overflow</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_3">
+      <g>
+       <use xlink:href="#mb1074ebe63" x="267.294584" y="240.418976" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(228.332853 267.414855) rotate(-20)">null-deref</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#mb1074ebe63" x="348.027759" y="240.418976" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(298.65372 271.204626) rotate(-20)">stack-strcpy</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_5">
+      <g>
+       <use xlink:href="#mb1074ebe63" x="428.760934" y="240.418976" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(374.026609 273.15561) rotate(-20)">use-after-free</text>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#mb1074ebe63" x="509.494109" y="240.418976" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <text style="font-size: 8.5px; font-family: 'DejaVu Sans'" transform="translate(466.094386 269.030152) rotate(-20)">vector-oob</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_7">
+      <defs>
+       <path id="m32369950e5" d="M 0 0 
+L -3.5 0 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m32369950e5" x="50.122344" y="229.575692" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_7">
+      <!-- $\mathdefault{10^{3}}$ -->
+      <g transform="translate(25.522344 234.275692)">
+       <text>
+        <tspan x="0" y="-0.674688" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="6.362305" y="-0.674688" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="12.820312" y="-4.804688" style="font-size: 7px; font-family: 'DejaVu Sans'">3</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#m32369950e5" x="50.122344" y="104.572519" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <!-- $\mathdefault{10^{4}}$ -->
+      <g transform="translate(25.522344 109.222519)">
+       <text>
+        <tspan x="0" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">1</tspan>
+        <tspan x="6.362305" y="-0.762187" style="font-size: 10px; font-family: 'DejaVu Sans'">0</tspan>
+        <tspan x="12.820312" y="-4.892187" style="font-size: 7px; font-family: 'DejaVu Sans'">4</tspan>
+       </text>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_9">
+      <defs>
+       <path id="mda249836c8" d="M 0 0 
+L -2 0 
+" style="stroke: #000000; stroke-width: 0.6"/>
+      </defs>
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="235.295524" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_10">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="191.945987" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_11">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="169.934021" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="154.316283" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_13">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="142.202223" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_8">
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="132.304316" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_9">
+     <g id="line2d_15">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="123.935755" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_16">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="116.686578" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_17">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="110.29235" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="66.942814" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_13">
+     <g id="line2d_19">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="44.930848" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="ytick_14">
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#mda249836c8" x="50.122344" y="29.313109" style="stroke: #000000; stroke-width: 0.6"/>
+      </g>
+     </g>
+    </g>
+    <g id="text_9">
+     <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle" x="19.12" y="132.598258" transform="rotate(-90 19.12 132.598258)">characters shown to the model per episode (log)</text>
+    </g>
+   </g>
+   <g id="patch_15">
+    <path d="M 50.122344 240.418976 
+L 50.122344 24.777539 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 50.122344 240.418976 
+L 565.2 240.418976 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans'; text-anchor: middle" x="121.974869" y="158.46071" transform="rotate(-0 121.974869 158.46071)">1x</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans'; text-anchor: middle" x="202.708044" y="204.093987" transform="rotate(-0 202.708044 204.093987)">1x</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans'; text-anchor: middle" x="283.441219" y="201.121264" transform="rotate(-0 283.441219 201.121264)">3x</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans'; text-anchor: middle" x="364.174394" y="200.928752" transform="rotate(-0 364.174394 200.928752)">5x</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans'; text-anchor: middle" x="444.907569" y="194.303699" transform="rotate(-0 444.907569 194.303699)">12x</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans'; text-anchor: middle" x="525.640744" y="185.890608" transform="rotate(-0 525.640744 185.890608)">20x</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 10.5px; font-family: 'DejaVu Sans'; text-anchor: middle" x="307.661172" y="18.777539" transform="rotate(-0 307.661172 18.777539)">Claude Sonnet 4.6, feedback forced into context: same fix, far less shown</text>
+   </g>
+   <g id="legend_1">
+    <g id="patch_17">
+     <path d="M 56.422344 58.978945 
+L 181.058281 58.978945 
+Q 182.858281 58.978945 182.858281 57.178945 
+L 182.858281 31.077539 
+Q 182.858281 29.277539 181.058281 29.277539 
+L 56.422344 29.277539 
+Q 54.622344 29.277539 54.622344 31.077539 
+L 54.622344 57.178945 
+Q 54.622344 58.978945 56.422344 58.978945 
+z
+" style="fill: #ffffff; opacity: 0.8; stroke: #cccccc; stroke-linejoin: miter"/>
+    </g>
+    <g id="patch_18">
+     <path d="M 58.222344 39.716133 
+L 76.222344 39.716133 
+L 76.222344 33.416133 
+L 58.222344 33.416133 
+z
+" style="fill: #9aa4ae"/>
+    </g>
+    <g id="text_17">
+     <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start" x="83.422344" y="39.716133" transform="rotate(-0 83.422344 39.716133)">raw output</text>
+    </g>
+    <g id="patch_19">
+     <path d="M 58.222344 53.216836 
+L 76.222344 53.216836 
+L 76.222344 46.916836 
+L 58.222344 46.916836 
+z
+" style="fill: #2e7d4f"/>
+    </g>
+    <g id="text_18">
+     <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start" x="83.422344" y="53.216836" transform="rotate(-0 83.422344 53.216836)">typed verdict + delta</text>
+    </g>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p450241296a">
+   <rect x="50.122344" y="24.777539" width="515.077656" height="215.641437"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>fig_sonnet_rbe.svg</figcaption></figure>
+<p>terse); double-free 4,532→3,306; null-deref 3,630→1,289; stack-strcpy 5,854→1,295; <strong>use-after-free 17,949→1,515 (11.8×)</strong>; <strong>cpp-vector-oob 36,302→1,836 (19.8×)</strong>. Every task solved in both conditions in the same ~6 turns; the compression tracks how noisy the raw output is.</p>
+<p>The result, stated plainly: <strong>once the feedback is actually delivered, the typed verdict carries the same signal at equal success and equal turns while showing the model ~7× fewer characters on average (up to 20× on the noisiest task), at essentially equal cost.</strong> It does not (yet) reduce <em>turns</em> on a frontier model — because these single-file bugs are solved in one edit whether the model reads 36 KB or 1.8 KB; the token saving is the effect here, and it is exactly the "same outcome, far less context" that the RTK studies showed byte-compression fails to deliver. Whether typed feedback also cuts turns needs tasks where the model must iterate and cannot fix from one glance at the source — real vulnerabilities (SEC-bench/ARVO), multi-file bugs — which is the next experiment, not this one.</p>
+<h3>6.6 Correctness and containment checks (<code>bench/out/checks.md</code>)</h3>
+<p><em>Tests.</em> 16 unit/integration tests on real fixtures (ASan heap overflow with alloc stack, UBSan, gcc, rustc, pytest, cargo test, unittest, Rust panic, check scripts, delta line-shift/crash-moved/ test-fix cases, renderer determinism); <code>sbx selftest</code>; end-to-end ASan verdict + "crash moved" + "crash SAME" on real gcc output; Python/Rust renderer parity on 7 fixtures; 48/48 mock-mode episodes; 12/12 task validations (buggy fails, solution passes, inside sbx).</p>
+<p><em>Containment probes</em> (29, run inside sbx — <code>escape_probes.sh</code>): host secrets (<code>/etc/shadow</code>), host filesystem (<code>/home /root /var</code>, <code>/proc/1/root</code>, <code>/work/..</code>), writes outside <code>/work</code>, <code>mount</code>/ <code>unshare</code>/<code>chroot</code>, <code>ptrace</code>, signals to host pids, TCP/DNS egress, <code>/dev/sda</code> <code>/dev/mem</code> <code>/dev/kmsg</code>, <code>/proc/sysrq-trigger</code> <code>/proc/kcore</code> <code>/proc/sys</code>, <code>sudo</code>, <code>io_uring</code>/<code>bpf</code>/<code>AF_ALG</code>, hostname and secret-named env leaks: <strong>29/29 contained</strong> (one hardening came out of the first run: the tmpfs root is now remounted read-only after setup). This is containment against the mis-configuration classes SandboxEscapeBench found to matter, not a kernel-security claim.</p>
+<p><em>Localization accuracy</em> (<code>localization_check.py</code>): does the verdict's first user frame (or first error diagnostic) point at the ground-truth faulting line? <strong>10/10 tasks</strong> — and the check itself found and fixed three parser gaps (Rust ≥ 1.9x prints a thread id in the panic line; unittest failures now carry the innermost frame of the code under test rather than the test file; ASan's "attempting double-free" kind was cut at the first space).</p>
+<p><em>Parser robustness</em> (<code>fuzz_parsers.sh 300</code>): 300 mutated/garbage inputs (byte flips, truncation, line shuffles, random bytes, 30× repeats, splices, CRLF) → 0 failures, 4.5 ms mean per call including process spawn, 18 ms worst.</p>
+<p><em>Hook, live in Claude Code.</em> A nested headless <code>claude -p</code> session (Claude Code 2.1.239, Windows host, Haiku 4.5, $0.03) with the PostToolUse hook configured ran <code>cat asan.log</code>: the hook was invoked by the real harness, received <code>tool_response</code> as an object (the hook accepts both shapes), and replaced a 2 647-byte ASan report with a 544-byte verdict in 114 ms through the WSL bridge.</p>
+<h3>6.7 Causal attribution: does the agent <em>trust</em> the executor's verdict?</h3>
+<p>§6.5 showed a frontier model often fixes a single-file bug from source and never runs the buggy code. That is an observation about <em>behaviour</em>; it does not tell us whether, when the feedback <strong>is</strong> delivered, the model <em>uses</em> it or merely tolerates it. We test use <strong>causally</strong>: because sbx is deterministic we re-run the identical episode and change <strong>only the presented verdict</strong> &mdash; a clean information-channel intervention no post-hoc byte filter could support.</p>
+<p><strong>Design.</strong> The sandbox executes byte-identically across five arms; only the text shown after a run differs. <em>truth</em> &mdash; the real typed verdict. <em>corrupt_line</em> &mdash; identical, but the reported fault line is replaced by an <strong>expert-plausible decoy</strong>: a real statement of the <em>same syntactic class</em> as the true fault, <strong>causally inert</strong> (an edit there cannot pass the tests), 8&ndash;25 lines from the fix, rewritten <strong>consistently</strong> across the crash frame, stack, output tail and diagnostics so the lie leaves no tell (verified: no true-line token survives). <em>corrupt_kind</em> &mdash; identical, but the crash <em>class</em> is swapped for a different plausible class (e.g. out-of-bounds &rarr; use-after-free), re-pointing the <code>hint</code> and the implied fix strategy. <em>no_feedback</em> &mdash; exit code only, the matched no-information floor. <em>raw</em> &mdash; verbatim output, which has no single field to corrupt. <strong>Readout:</strong> the line numbers the agent's <strong>first</strong> <code>write_file</code> changes (difflib-minimal, so a full-file rewrite still yields the true edited lines); <code>hit_true_fix</code> = first edit within &plusmn;3 of the fix locus (auto-derived from the solution diff); <code>steered</code> = followed the decoy <strong>and</strong> missed the fix. <code>run-before-edit</code> is enforced so the (corrupted) verdict is in context before any edit. Four memory-safety tasks (heap-overflow, use-after-free, null-deref, C++ vector OOB), Claude Sonnet 4.6 via the CLI, one seed, paired by task; a fifth &ldquo;haystack&rdquo; task (below) is added at three seeds.</p>
+<div class="tbl"><table><thead><tr><th>arm</th><th>n</th><th>success</th><th>first edit on true fix</th><th>followed shown line</th><th>steered</th></tr></thead><tbody><tr><td>truth</td><td>4</td><td>4/4</td><td>4/4</td><td>2/4</td><td>&mdash;</td></tr><tr><td><strong>corrupt_line</strong></td><td>4</td><td><strong>4/4</strong></td><td><strong>4/4</strong></td><td><strong>0/4</strong></td><td><strong>0/4</strong></td></tr><tr><td>corrupt_kind</td><td>4</td><td>4/4</td><td>4/4</td><td>3/4</td><td>&mdash;</td></tr><tr><td>no_feedback</td><td>4</td><td>4/4</td><td>4/4</td><td>3/4</td><td>&mdash;</td></tr><tr><td>raw</td><td>4</td><td>4/4</td><td>4/4</td><td>2/4</td><td>&mdash;</td></tr></tbody></table></div>
+<p>Every arm solved all four and put its first edit on the true fix &mdash; <strong>including <code>no_feedback</code></strong>. Under <code>corrupt_line</code> the model <strong>never once touched the decoy</strong>: P(first edit on decoy | decoy shown) = <strong>0/4</strong>, versus <strong>0/12</strong> when the decoy is not shown; paired McNemar on <code>hit_true_fix</code> gives b = c = 0 (p = 1.0); the first edit's displacement from the true fix has median <strong>0 lines</strong> (one task moved <em>toward</em> the fix under corruption). The byte-identical-execution audit confirms the pre-feedback run's raw bytes are identical across all arms per task, so the manipulation is presentation-only. <code>corrupt_kind</code> &mdash; the stronger lie &mdash; left the first edit on the true fix in <strong>all four</strong> tasks (paired McNemar p = 1.0): telling the model a heap overflow was a use-after-free, or vice versa, did not change <em>which line</em> it repaired.</p>
+<figure>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 446" font-family="Source Sans 3,system-ui,sans-serif">
+<rect width="820" height="446" fill="#F6F7F5"/>
+<text x="175" y="30" font-size="15" font-weight="600" fill="#1b2125">A corrupted fault line does not move the agent's edit</text>
+<text x="175" y="50" font-size="12" fill="#69747c">Under <tspan fill="#b5462f">corrupt_line</tspan>, the verdict points at the red line; the agent's first edit (●) still lands on the true fix (green).</text>
+<rect x="175" y="67" width="16" height="10" fill="#2e7d4f" opacity="0.30"/><text x="196" y="76" font-size="11" fill="#69747c">true fix</text>
+<circle cx="287" cy="72" r="4" fill="#b5462f"/><text x="295" y="76" font-size="11" fill="#69747c">decoy shown</text>
+<circle cx="407" cy="72" r="4" fill="#2c6b8c"/><text x="415" y="76" font-size="11" fill="#69747c">true crash line</text>
+<circle cx="547" cy="72" r="5" fill="#1b2125"/><text x="557" y="76" font-size="11" fill="#69747c">first edit</text>
+<text x="163" y="124" font-size="12" text-anchor="end" fill="#1b2125">haystack-oob</text>
+<line x1="175" y1="120" x2="735" y2="120" stroke="#c9d1cd" stroke-width="1.5"/>
+<rect x="485" y="109" width="12" height="22" fill="#2e7d4f" opacity="0.22"/>
+<circle cx="492" cy="120" r="4" fill="#2c6b8c"/>
+<circle cx="345" cy="120" r="4" fill="#b5462f"/>
+<text x="345" y="106" font-size="10" text-anchor="middle" fill="#b5462f">L15</text>
+<circle cx="492" cy="120" r="5.5" fill="#1b2125"/>
+<text x="163" y="186" font-size="12" text-anchor="end" fill="#1b2125">heap-overflow</text>
+<line x1="175" y1="182" x2="735" y2="182" stroke="#c9d1cd" stroke-width="1.5"/>
+<rect x="352" y="171" width="12" height="22" fill="#2e7d4f" opacity="0.22"/>
+<circle cx="406" cy="182" r="4" fill="#2c6b8c"/>
+<circle cx="455" cy="182" r="4" fill="#b5462f"/>
+<text x="455" y="168" font-size="10" text-anchor="middle" fill="#b5462f">L24</text>
+<circle cx="358" cy="182" r="5.5" fill="#1b2125"/>
+<text x="163" y="248" font-size="12" text-anchor="end" fill="#1b2125">null-deref</text>
+<line x1="175" y1="244" x2="735" y2="244" stroke="#c9d1cd" stroke-width="1.5"/>
+<rect x="388" y="233" width="24" height="22" fill="#2e7d4f" opacity="0.22"/>
+<circle cx="418" cy="244" r="4" fill="#2c6b8c"/>
+<circle cx="711" cy="244" r="4" fill="#b5462f"/>
+<text x="711" y="230" font-size="10" text-anchor="middle" fill="#b5462f">L45</text>
+<circle cx="297" cy="244" r="5.5" fill="#1b2125"/>
+<circle cx="394" cy="244" r="5.5" fill="#1b2125"/>
+<text x="163" y="310" font-size="12" text-anchor="end" fill="#1b2125">use-after-free</text>
+<line x1="175" y1="306" x2="735" y2="306" stroke="#c9d1cd" stroke-width="1.5"/>
+<rect x="498" y="295" width="24" height="22" fill="#2e7d4f" opacity="0.22"/>
+<circle cx="418" cy="306" r="4" fill="#2c6b8c"/>
+<circle cx="613" cy="306" r="4" fill="#b5462f"/>
+<text x="613" y="292" font-size="10" text-anchor="middle" fill="#b5462f">L37</text>
+<circle cx="516" cy="306" r="5.5" fill="#1b2125"/>
+<text x="163" y="372" font-size="12" text-anchor="end" fill="#1b2125">vector-oob</text>
+<line x1="175" y1="368" x2="735" y2="368" stroke="#c9d1cd" stroke-width="1.5"/>
+<rect x="327" y="357" width="12" height="22" fill="#2e7d4f" opacity="0.22"/>
+<circle cx="345" cy="368" r="4" fill="#2c6b8c"/>
+<circle cx="479" cy="368" r="4" fill="#b5462f"/>
+<text x="479" y="354" font-size="10" text-anchor="middle" fill="#b5462f">L26</text>
+<circle cx="333" cy="368" r="5.5" fill="#1b2125"/>
+<text x="175" y="432" font-size="11" fill="#69747c">line number →   (Claude Sonnet 4.6; 4/4 edits on the true fix, decoy touched 0 times)</text>
+</svg>
+</figure>
+<p><strong>Stress test &mdash; a haystack that makes the verdict load-bearing.</strong> To rule out that the null merely reflects trivially-obvious bugs, we added a fifth task (<code>c-haystack-oob</code>): 24 near-identical field handlers, each copying its value into its own 16-byte heap slot behind a length guard, with exactly one guard off-by-one (line 27). Locating it means auditing all 24 lines, so the verdict's line <em>should</em> be load-bearing. Claude Sonnet 4.6, three seeds: with the truthful verdict (line 27) it fixed line 27 every time; with the line corrupted to a plausible decoy (line 15 &mdash; another field's <em>correct</em> guard, 12 lines away) it <strong>still fixed line 27 in 3/3</strong>, never touching the decoy, at only a small turn cost. Across all five tasks the decoy is touched in <strong>0 of 22</strong> opportunities (15 when hidden, 7 when shown) and steering is <strong>0/7</strong> (paired McNemar p = 1.0). Even when self-verification is made expensive <em>and</em> the executor lies about which guard is wrong, the model finds the real one.</p>
+<p><strong>Interpretation.</strong> The executor's localization is <strong>not load-bearing</strong> here: the model fixes every bug from source, succeeding even with zero feedback, so corrupting the localization is inert. A frontier code agent, on a bug it can read, treats the typed verdict as <em>decoration</em> and re-derives the fault from source &mdash; it does <strong>not</strong> defer to the tool, and it silently <strong>overrides</strong> a coherent, undetectable lie about where the bug is. This is the causal sharpening of §6.5's bypass. It also runs against a naive reading of the literature, where agents adopt raw tool output 97.6&ndash;99.2 % of the time (<em>When the Tool Decides</em>, arXiv:2606.14476) and plausible-but-wrong observations flip ~32 % of otherwise-correct decisions (<em>When History Lies</em>, arXiv:2608.06057) &mdash; but those hold where the model <em>must</em> rely on the channel (retrieval QA, chat history, a frozen classifier). Here it can self-verify, so it does.</p>
+<p>The boundary is therefore precise, and it restates this paper's design thesis as a testable law: <strong>a corrupted verdict &mdash; hence a nondeterministic or buggy executor &mdash; can mislead the agent only where the agent cannot independently verify from source.</strong> That is exactly the regime typed feedback targets (large repos; memory bugs whose crash site is far from the cause; source-insufficient patches), and exactly where a <em>correct</em>, deterministic verdict matters most &mdash; the constructive complement to &ldquo;Don't Blindly Trust It&rdquo; (arXiv:2606.21409), whose value-inversion appears precisely when the feedback is load-bearing.</p>
+<p><strong>Novelty.</strong> Prior corruption studies corrupt a whole observation (retrieval QA) [23], the reported fault location in a <em>single-shot</em> APR replication (arXiv:2507.20977), or chat history on a 1.7 B model (2608.06057); typed-field studies <em>add or remove truthful</em> fields (VeriHarness [13]). To our knowledge this is the first to corrupt a <strong>single typed field of an executor verdict while holding execution byte-identical</strong>, on a <strong>frontier agent in a real loop</strong>, with a <strong>first-edit-line causal readout</strong> and matched <strong>raw + no-feedback</strong> controls.</p>
+<p><strong>Limits.</strong> Four tasks, one seed, one model+version; small verifiable single-file bugs by design &mdash; an existence/robustness result with a large minimum detectable effect: it establishes that <strong>no large steering effect exists in this regime</strong>, not that none exists anywhere. A capability contrast (a model that engages the loop yet cannot self-verify) and the predicted positive &mdash; steering where the model <em>cannot</em> fix from source (SEC-bench/ARVO, multi-file, masked source) &mdash; are the next experiment.</p>
+<hr>
+<h2>7. Discussion</h2>
+<p><strong>Bytes vs turns.</strong> The 3 B data already separate the two: the verdict is not smaller than raw on half the tasks, yet the agent finishes in fewer turns and more often. The lever is <em>which</em> facts arrive first — the faulting line, the failing checks, "your change did not affect the crash" — not how many characters arrive. This is consistent with the RTK evaluations [5, 6] and with the literature on feedback <em>content</em> (RustAssistant, VeriHarness, PGS).</p>
+<p><strong>When feedback matters at all.</strong> The Claude arm (§6.5) makes the boundary sharp: a capable model fixes a short single-file bug by <em>reading the source</em> and never runs the buggy code, so feedback — raw or typed — is unused (Sonnet, 12/12 first-run = pass). Feedback is a lever only at the margin of capability: the weak 3 B model, which cannot fix from source, is where the typed verdict moved success; and, when we force the buggy run into context, the typed verdict delivers the same result as raw in ~12× fewer characters. So the effect is real but conditional — it needs either a model that must lean on the run output, or a task too hard/large to fix from a glance at the source. Our in-house tasks are deliberately small (to isolate diagnosis), which makes them <em>too easy</em> for a frontier model to exercise the feedback channel; the next experiment needs harder, feedback-forcing tasks.</p>
+<p><strong>Where typed feedback should lose.</strong> Temporal memory bugs that need dynamic state beyond the report [19]; programs whose failure is only visible in long output the verdict tails away; models strong enough to read 60 KB and weak enough to over-trust a terse verdict.</p>
+<p><strong>Determinism as design, not decoration.</strong> §6.2 is the clearest result in the study: without the profile, byte-level feedback is unstable every run and a naive delta is noise; with an address-free identity <em>and</em> the profile, both identity and text are stable. This is the argument for putting feedback inside the executor rather than in a post-hoc filter that never sees two runs.</p>
+<p><strong>What this does not claim.</strong> No frontier-model numbers yet; n = 10–12 per condition; one seed; one machine; tasks are small and the fixes local by design (we measure diagnosis, not refactoring). The 7 B arm is a genuine null at its budget: when a model cannot fix the bug in 15 turns under <em>any</em> presentation, the presentation cannot matter — feedback form is a lever only where the model is otherwise capable of the fix, which is exactly why the frontier arm is the decisive one. We also note a measurement subtlety the 7 B run exposed: the nudge mechanism for prose-only answers costs turns from a fixed budget and may itself interact with the condition (a verbose raw observation seems to provoke more prose); a turn budget that excludes nudges, or a larger one, is the fairer design and is what the queued v2 run uses.</p>
+<hr>
+<h2>8. Threats to validity</h2>
+<p><em>Construct:</em> success is judged by the task's own tests inside sbx — a plausible patch that passes them counts, as in SWE-bench; we do not run differential tests. <em>Internal:</em> local models get sequential tool calls and nudges; both are recorded and identical across conditions; Ollama's <code>prompt_eval_count</code> under-reports prompt tokens after KV-cache reuse (a conservative bias against our own token numbers). <em>External:</em> 12 small tasks; Python-free of <code>pytest</code> (unittest used); C/C++ with sanitizers dominate by design. <em>Statistical:</em> single seed so far; Wilson CIs reported; agent evaluations carry 2–6 pp noise at temperature 0. <em>Cost:</em> local runs cost $0; cache-aware billing is implemented but only meaningful on the API arm.</p>
+<h2>9. Future work</h2>
+<p>Frontier arm (Claude Opus 5, 3–5 seeds, masking and regex conditions); 30–50 tasks incl. SEC-bench/ ARVO, ComBench, CRUST-Bench, Terminal-Bench <code>polyglot-*</code>; Landlock stacking; time namespace and seeded <code>getrandom</code>; snapshot/fork of <code>/work</code> for tree search; mini-SWE-agent and Harbor backends; a robotics plugin (MuJoCo "physical verdict": constraint violations with first-violation time, torque saturation, stability margins) on the same contract.</p>
+<h2>10. Conclusion</h2>
+<p>An executor that owns the facts can say what happened and what changed, in a few hundred bytes, every time, for four milliseconds. The weak-model pilot says that this — not the byte count — is what moves a coding agent; the determinism experiment says the executor must be hermetic for it to be true at all. The rest is measurement, and the instrument is built.</p>
+<hr>
+<h2>Appendix A. Reproducibility</h2>
+<pre><code># Linux / WSL2, no root. Build + self-test + micro-experiments:
+cargo build --release -p sbx-cli
+source bench/scripts/env.sh
+sbx selftest &amp;&amp; sbx bench --n 30
+bash bench/scripts/startup_bench.sh 30
+bash bench/scripts/determinism.sh 10
+# Tasks and harness:
+bash bench/scripts/setup_venv.sh &amp;&amp; bash bench/scripts/validate_tasks.sh &amp;&amp; bash bench/scripts/smoke_agent.sh
+# Local pilot (Ollama):  ollama pull qwen2.5-coder:7b
+bash bench/scripts/ollama_pilot.sh qwen2.5-coder:7b 1 raw,truncate10k,structured,structured_delta 1 15
+$SBX_PY bench/agent/analyze.py bench/out/pilot-qwen2.5-coder_7b.jsonl --md docs/paper/pilot-7b.md
+$SBX_PY bench/agent/plot.py --results bench/out/pilot-*.jsonl --startup bench/out/startup_bench.json --out bench/out/figs
+# API arm:  ANTHROPIC_API_KEY=… $SBX_PY bench/agent/run.py --model claude-opus-5 --seeds 3 --workers 3</code></pre>
+<h2>References</h2>
+<p>[1] Lindenbauer et al., "The Complexity Trap", NeurIPS'25 DL4Code, arXiv:2508.21433. [2] CoACT, arXiv:2607.02911. [3] claude-devtools context measurement, Mar 2026. [4] Artificial Analysis Coding Agent Index v1.4, 2026. [5] JetBrains AI, "RTK and Claude Code token savings", Jul 2026. [6] Weinberger &amp; Hozez, "Token Reduction Is Not Cost Reduction", arXiv:2607.12161. [7] research report <code>research/raw/01-sandbox-landscape.md</code> (E2B, Modal, Daytona, Vercel, Docker Sandboxes, K8s agent-sandbox, OpenSandbox, OpenShell, Anthropic sandbox-runtime, Codex sandbox; harness truncation rules). [8] Anthropic, "Quantifying infrastructure noise in agentic coding evals", Feb 2026. [9] Terminal-Bench 2.1 release notes, May 2026. [10] Yang et al., SWE-agent, arXiv:2405.15793. [11] "Is Three the Magic Number?", arXiv:2607.05197. [12] RustAssistant, ICSE'25, arXiv:2308.05177. [13] VeriHarness, arXiv:2607.14167. [14] PGS, arXiv:2506.18315. [15] Generative Compilation, arXiv:2607.13921. [16] Fact Selection, arXiv:2404.05520. [17] "What Makes a Good Bug Report for an AI Agent?", arXiv:2607.07593. [18] WilliamT, arXiv:2505.13103. [19] DebugHarness, arXiv:2604.03610. [20] AutoPatchBench, Meta 2025. [21] AgentDiet 2509.23586; ACON 2510.00615; SWE-Pruner 2601.16746; CoACT 2607.02911; TACO 2604.19572. [22] "Less Context, Better Agents", arXiv:2606.10209. [23] Grounded Scaling 2606.22495; Don&rsquo;t Blindly Trust It 2606.21409; DeltaBox 2605.22781; Crab 2604.28138. [24] "On Randomness in Agentic Evals", arXiv:2602.07150.</p>
+</div>

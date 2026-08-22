@@ -1,0 +1,15 @@
+name = "c-stack-strcpy"
+lang = "c"
+family = "memory-safety"
+bug = "stack-buffer-overflow via unbounded strcpy/strcat"
+prompt = """
+`greet.c` reads names from stdin (one per line) and prints `Hello, <NAME>!` with the name
+upper-cased, truncating names longer than 31 characters to their first 31 characters. `sh test.sh`
+builds it with AddressSanitizer/UBSan and checks the output on several inputs, including a long
+name. The tests currently fail. Fix the bug in `greet.c`; do not modify `test.sh` or the output
+format.
+"""
+run = "sh test.sh"
+files = ["greet.c"]
+protected = ["test.sh"]
+timeout = 120

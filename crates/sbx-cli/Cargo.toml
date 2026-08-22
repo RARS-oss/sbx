@@ -1,0 +1,18 @@
+[package]
+name = "sbx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "sbx — run a command hermetically and get a typed verdict (+ delta vs. last run) instead of raw output"
+
+[[bin]]
+name = "sbx"
+path = "src/main.rs"
+
+[dependencies]
+hermit-core.workspace = true
+feedback.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true

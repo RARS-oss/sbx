@@ -1,0 +1,19 @@
+src/main.c: In function 'compute':
+src/main.c:12:5: error: 'total' undeclared (first use in this function)
+   12 |     total += values[i];
+      |     ^~~~~
+src/main.c:12:5: note: each undeclared identifier is reported only once for each function it appears in
+src/main.c:9:9: warning: unused variable 'tmp' [-Wunused-variable]
+    9 |     int tmp = 0;
+      |         ^~~
+src/main.c: In function 'main':
+src/main.c:27:12: error: incompatible types when returning type 'char *' but 'int' was expected
+   27 |     return name;
+      |            ^~~~
+src/util.c: In function 'parse':
+src/util.c:41:18: error: 'buf' undeclared (first use in this function); did you mean 'bufs'?
+   41 |     return strlen(buf);
+      |                  ^~~
+      |                  bufs
+src/util.c:3:1: warning: implicit declaration of function 'strlen' [-Wimplicit-function-declaration]
+make: *** [Makefile:12: build/main.o] Error 1

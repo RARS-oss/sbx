@@ -1,0 +1,14 @@
+name = "c-null-deref"
+lang = "c"
+family = "memory-safety"
+bug = "NULL dereference on an empty token list (ASan SEGV) + lost last token"
+prompt = """
+`tokenizer.c` splits each stdin line on spaces/tabs into tokens and prints `N: tok1|tok2|...`
+(N = number of tokens; empty lines print `0:`). `sh test.sh` builds it with AddressSanitizer/UBSan
+and checks known outputs; the tests currently fail. Fix the bug(s) in `tokenizer.c`; do not modify
+`test.sh` or the output format.
+"""
+run = "sh test.sh"
+files = ["tokenizer.c"]
+protected = ["test.sh"]
+timeout = 120

@@ -1,0 +1,37 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.2.0, pluggy-1.5.0
+rootdir: /work
+collected 7 items
+
+tests/test_calc.py ..F..                                                 [ 71%]
+tests/test_io.py F.                                                      [100%]
+
+=================================== FAILURES ===================================
+_________________________________ test_divide __________________________________
+
+    def test_divide():
+>       assert divide(1, 0) == 0
+                   ^^^^^^^^^^^^
+
+tests/test_calc.py:14:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+a = 1, b = 0
+
+    def divide(a, b):
+>       return a / b
+               ^^^^^
+E       ZeroDivisionError: division by zero
+
+calc.py:9: ZeroDivisionError
+__________________________________ test_read ___________________________________
+
+    def test_read():
+>       assert read_config("missing.toml") == {}
+E       FileNotFoundError: [Errno 2] No such file or directory: 'missing.toml'
+
+tests/test_io.py:6: FileNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_calc.py::test_divide - ZeroDivisionError: division by zero
+FAILED tests/test_io.py::test_read - FileNotFoundError: [Errno 2] No such file or directory: 'missing.toml'
+========================= 2 failed, 5 passed in 0.09s ==========================

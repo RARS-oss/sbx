@@ -1,0 +1,15 @@
+name = "c-double-free"
+lang = "c"
+family = "memory-safety"
+bug = "double free on the error path"
+prompt = """
+`pool.c` implements a tiny string pool: `pool_add` copies a string into the pool, `pool_find`
+looks one up, `pool_free` releases everything. `main` reads commands from stdin (`add S`,
+`find S`, `reset`, `dump`). `sh test.sh` builds it with AddressSanitizer/UBSan and runs a few
+command scripts; the tests currently fail. Fix the bug in `pool.c`; do not modify `test.sh` or
+the output format.
+"""
+run = "sh test.sh"
+files = ["pool.c"]
+protected = ["test.sh"]
+timeout = 120

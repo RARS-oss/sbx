@@ -1,0 +1,50 @@
+=================================================================
+==4242==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000038 at pc 0x55a4c3b2a2f4 bp 0x7ffd3c1e5a90 sp 0x7ffd3c1e5a88
+WRITE of size 4 at 0x602000000038 thread T0
+    #0 0x55a4c3b2a2f3 in fill /work/overflow.c:7:12
+    #1 0x55a4c3b2a3a1 in main /work/overflow.c:15:5
+    #2 0x7f1c2a629d8f in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58:16
+    #3 0x7f1c2a629e3f in __libc_start_main_impl ../csu/libc-start.c:392:3
+    #4 0x55a4c3b2a154 in _start (/work/overflow+0x1154) (BuildId: 3a1f0c9e7b2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f)
+
+0x602000000038 is located 0 bytes after 40-byte region [0x602000000010,0x602000000038)
+allocated by thread T0 here:
+    #0 0x7f1c2aab4a57 in malloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:69:3
+    #1 0x55a4c3b2a35e in main /work/overflow.c:13:16
+    #2 0x7f1c2a629d8f in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58:16
+    #3 0x7f1c2a629e3f in __libc_start_main_impl ../csu/libc-start.c:392:3
+    #4 0x55a4c3b2a154 in _start (/work/overflow+0x1154) (BuildId: 3a1f0c9e7b2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f)
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /work/overflow.c:7:12 in fill
+Shadow bytes around the buggy address:
+  0x0c047fff7fb0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fc0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fd0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fe0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7ff0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0c047fff8000: fa fa 00 00 00 00 00[fa]fa fa fa fa fa fa fa fa
+  0x0c047fff8010: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8020: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8030: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8040: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8050: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==4242==ABORTING

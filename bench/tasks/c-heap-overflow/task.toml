@@ -1,0 +1,15 @@
+name = "c-heap-overflow"
+lang = "c"
+family = "memory-safety"
+bug = "heap-buffer-overflow (off-by-one write)"
+prompt = """
+The program `histogram.c` reads integers from stdin (one per line), builds a histogram of values
+0..N-1 where N is the first line, and prints `i: count` for each bucket, then `total=<count>`.
+`sh test.sh` compiles it with AddressSanitizer/UBSan and checks its output on several inputs.
+Currently the tests fail. Fix the bug in `histogram.c` without changing `test.sh` or the output
+format. Keep the program's structure; make the minimal correct change.
+"""
+run = "sh test.sh"
+files = ["histogram.c"]
+protected = ["test.sh"]
+timeout = 120

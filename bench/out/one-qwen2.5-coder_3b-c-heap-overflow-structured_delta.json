@@ -1,0 +1,505 @@
+{
+ "record": {
+  "task": "c-heap-overflow",
+  "family": "memory-safety",
+  "bug": "heap-buffer-overflow (off-by-one write)",
+  "lang": "c",
+  "condition": "structured_delta",
+  "mask": null,
+  "model": "ollama:qwen2.5-coder:3b",
+  "effort": "high",
+  "seed": 0,
+  "success": false,
+  "protected_ok": true,
+  "final_status": "build_failed",
+  "final_stop_reason": "tool_use",
+  "done_called": false,
+  "done_summary": null,
+  "turns": 17,
+  "tool_turns": 15,
+  "prose_turns": 2,
+  "nudges": 2,
+  "infra_error": null,
+  "tool_calls": {
+   "read_file": 1,
+   "write_file": 7,
+   "run": 7,
+   "done": 0,
+   "invalid": 0
+  },
+  "edits": [
+   {
+    "turn": 1,
+    "path": "histogram.c",
+    "changed_lines": [
+     1
+    ],
+    "chars": 15
+   },
+   {
+    "turn": 3,
+    "path": "histogram.c",
+    "changed_lines": [],
+    "chars": 15
+   },
+   {
+    "turn": 5,
+    "path": "histogram.c",
+    "changed_lines": [],
+    "chars": 15
+   },
+   {
+    "turn": 9,
+    "path": "histogram.c",
+    "changed_lines": [],
+    "chars": 15
+   },
+   {
+    "turn": 11,
+    "path": "histogram.c",
+    "changed_lines": [],
+    "chars": 15
+   },
+   {
+    "turn": 13,
+    "path": "histogram.c",
+    "changed_lines": [],
+    "chars": 15
+   },
+   {
+    "turn": 16,
+    "path": "histogram.c",
+    "changed_lines": [],
+    "chars": 15
+   }
+  ],
+  "tokens": {
+   "input": 28100,
+   "output": 378,
+   "cache_read": 0,
+   "cache_creation": 0
+  },
+  "cost_usd": 0.0,
+  "wall_s": 1184.7,
+  "raw_bytes_total": 770,
+  "shown_chars_total": 1828,
+  "runs": [
+   {
+    "status": "build_failed",
+    "raw_bytes": 110,
+    "shown_chars": 220,
+    "wall_ms": 62,
+    "tests_failed": null,
+    "tests_passed": null,
+    "crash_kind": null,
+    "diag_errors": 1
+   },
+   {
+    "status": "build_failed",
+    "raw_bytes": 110,
+    "shown_chars": 268,
+    "wall_ms": 51,
+    "tests_failed": null,
+    "tests_passed": null,
+    "crash_kind": null,
+    "diag_errors": 1
+   },
+   {
+    "status": "build_failed",
+    "raw_bytes": 110,
+    "shown_chars": 268,
+    "wall_ms": 42,
+    "tests_failed": null,
+    "tests_passed": null,
+    "crash_kind": null,
+    "diag_errors": 1
+   },
+   {
+    "status": "build_failed",
+    "raw_bytes": 110,
+    "shown_chars": 268,
+    "wall_ms": 15,
+    "tests_failed": null,
+    "tests_passed": null,
+    "crash_kind": null,
+    "diag_errors": 1
+   },
+   {
+    "status": "build_failed",
+    "raw_bytes": 110,
+    "shown_chars": 268,
+    "wall_ms": 30,
+    "tests_failed": null,
+    "tests_passed": null,
+    "crash_kind": null,
+    "diag_errors": 1
+   },
+   {
+    "status": "build_failed",
+    "raw_bytes": 110,
+    "shown_chars": 268,
+    "wall_ms": 26,
+    "tests_failed": null,
+    "tests_passed": null,
+    "crash_kind": null,
+    "diag_errors": 1
+   },
+   {
+    "status": "build_failed",
+    "raw_bytes": 110,
+    "shown_chars": 268,
+    "wall_ms": 15,
+    "tests_failed": null,
+    "tests_passed": null,
+    "crash_kind": null,
+    "diag_errors": 1
+   }
+  ],
+  "workdir": null
+ },
+ "trajectory": [
+  {
+   "turn": 0,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_1_0",
+     "name": "read_file",
+     "input": {
+      "path": "histogram.c"
+     }
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 0,
+   "tool": "read_file",
+   "input": {
+    "path": "histogram.c"
+   },
+   "result_chars": 696
+  },
+  {
+   "turn": 1,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_2_0",
+     "name": "write_file",
+     "input": {
+      "path": "histogram.c",
+      "content": "<tool_response>"
+     }
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 1,
+   "tool": "write_file",
+   "input": {
+    "path": "histogram.c",
+    "chars": 15,
+    "changed_lines": [
+     1
+    ]
+   },
+   "result_chars": 28
+  },
+  {
+   "turn": 2,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_3_0",
+     "name": "run",
+     "input": {}
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 2,
+   "tool": "run",
+   "input": {},
+   "result_chars": 220
+  },
+  {
+   "turn": 3,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_4_0",
+     "name": "write_file",
+     "input": {
+      "content": "<tool_response>",
+      "path": "histogram.c"
+     }
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 3,
+   "tool": "write_file",
+   "input": {
+    "path": "histogram.c",
+    "chars": 15,
+    "changed_lines": []
+   },
+   "result_chars": 28
+  },
+  {
+   "turn": 4,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_5_0",
+     "name": "run",
+     "input": {}
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 4,
+   "tool": "run",
+   "input": {},
+   "result_chars": 268
+  },
+  {
+   "turn": 5,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_6_0",
+     "name": "write_file",
+     "input": {
+      "content": "<tool_response>",
+      "path": "histogram.c"
+     }
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 5,
+   "tool": "write_file",
+   "input": {
+    "path": "histogram.c",
+    "chars": 15,
+    "changed_lines": []
+   },
+   "result_chars": 28
+  },
+  {
+   "turn": 6,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_7_0",
+     "name": "run",
+     "input": {}
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 6,
+   "tool": "run",
+   "input": {},
+   "result_chars": 268
+  },
+  {
+   "turn": 7,
+   "assistant": [],
+   "stop_reason": "end_turn"
+  },
+  {
+   "turn": 7,
+   "nudge": 1
+  },
+  {
+   "turn": 8,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_9_0",
+     "name": "run",
+     "input": {}
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 8,
+   "tool": "run",
+   "input": {},
+   "result_chars": 268
+  },
+  {
+   "turn": 9,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_10_0",
+     "name": "write_file",
+     "input": {
+      "content": "<tool_response>",
+      "path": "histogram.c"
+     }
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 9,
+   "tool": "write_file",
+   "input": {
+    "path": "histogram.c",
+    "chars": 15,
+    "changed_lines": []
+   },
+   "result_chars": 28
+  },
+  {
+   "turn": 10,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_11_0",
+     "name": "run",
+     "input": {}
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 10,
+   "tool": "run",
+   "input": {},
+   "result_chars": 268
+  },
+  {
+   "turn": 11,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_12_0",
+     "name": "write_file",
+     "input": {
+      "content": "<tool_response>",
+      "path": "histogram.c"
+     }
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 11,
+   "tool": "write_file",
+   "input": {
+    "path": "histogram.c",
+    "chars": 15,
+    "changed_lines": []
+   },
+   "result_chars": 28
+  },
+  {
+   "turn": 12,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_13_0",
+     "name": "run",
+     "input": {}
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 12,
+   "tool": "run",
+   "input": {},
+   "result_chars": 268
+  },
+  {
+   "turn": 13,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_14_0",
+     "name": "write_file",
+     "input": {
+      "content": "<tool_response>",
+      "path": "histogram.c"
+     }
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 13,
+   "tool": "write_file",
+   "input": {
+    "path": "histogram.c",
+    "chars": 15,
+    "changed_lines": []
+   },
+   "result_chars": 28
+  },
+  {
+   "turn": 14,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_15_0",
+     "name": "run",
+     "input": {}
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 14,
+   "tool": "run",
+   "input": {},
+   "result_chars": 268
+  },
+  {
+   "turn": 15,
+   "assistant": [],
+   "stop_reason": "end_turn"
+  },
+  {
+   "turn": 15,
+   "nudge": 2
+  },
+  {
+   "turn": 16,
+   "assistant": [
+    {
+     "type": "tool_use",
+     "id": "call_17_0",
+     "name": "write_file",
+     "input": {
+      "content": "<tool_response>",
+      "path": "histogram.c"
+     }
+    }
+   ],
+   "stop_reason": "tool_use"
+  },
+  {
+   "turn": 16,
+   "tool": "write_file",
+   "input": {
+    "path": "histogram.c",
+    "chars": 15,
+    "changed_lines": []
+   },
+   "result_chars": 28
+  }
+ ]
+}

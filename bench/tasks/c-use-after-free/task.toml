@@ -1,0 +1,15 @@
+name = "c-use-after-free"
+lang = "c"
+family = "memory-safety"
+bug = "heap-use-after-free (temporal)"
+prompt = """
+`list.c` implements a tiny singly-linked list of integers with `push_front`, `remove_value`
+(removes the first node holding a value) and `sum`, plus a `main` that reads commands from stdin
+(`push N`, `remove N`, `sum`, `print`). `sh test.sh` builds it with AddressSanitizer/UBSan and
+runs a few command scripts. The tests currently fail. Fix the bug in `list.c`; do not modify
+`test.sh` or the output format.
+"""
+run = "sh test.sh"
+files = ["list.c"]
+protected = ["test.sh"]
+timeout = 120

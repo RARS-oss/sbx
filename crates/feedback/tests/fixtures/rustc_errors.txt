@@ -1,0 +1,27 @@
+   Compiling demo v0.1.0 (/work)
+error[E0308]: mismatched types
+ --> src/main.rs:4:18
+  |
+4 |     let x: i32 = "five";
+  |            ---   ^^^^^^ expected `i32`, found `&str`
+  |            |
+  |            expected due to this
+
+warning: unused variable: `y`
+ --> src/main.rs:6:9
+  |
+6 |     let y = 7;
+  |         ^ help: if this is intentional, prefix it with an underscore: `_y`
+  |
+  = note: `#[warn(unused_variables)]` on by default
+
+error[E0425]: cannot find value `undefined_thing` in this scope
+ --> src/main.rs:9:20
+  |
+9 |     println!("{}", undefined_thing);
+  |                    ^^^^^^^^^^^^^^^ not found in this scope
+
+Some errors have detailed explanations: E0308, E0425.
+For more information about an error, try `rustc --explain E0308`.
+warning: `demo` (bin "demo") generated 1 warning
+error: could not compile `demo` (bin "demo") due to 2 previous errors; 1 warning emitted
