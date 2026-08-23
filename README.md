@@ -1,196 +1,163 @@
-# sbx — hermetic sandbox executor with typed, delta-aware feedback for coding agents
+<p align="center">
+  <img src="docs/banner.svg" alt="sbx — a hermetic executor that hands coding agents typed, delta-aware feedback" width="100%">
+</p>
 
-**Run a command in a throw-away Linux sandbox (no root, ~4 ms), and hand the agent a
-typed *verdict* — parsed compiler diagnostics, sanitizer/crash objects with the first
-user frame, failing tests grouped by root cause — plus a *delta* against the previous
-run ("2 errors fixed, 1 new; crash moved from `a.c:9` to `b.c:15`"), instead of 30 KB
-of raw stdout.**
+<p align="center">
+  <img src="https://img.shields.io/badge/Rust-2021-000?logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/tests-17%20passing-2f8f5b" alt="tests">
+  <img src="https://img.shields.io/badge/clippy%20%2B%20fmt-clean-2f8f5b" alt="lint">
+  <img src="https://img.shields.io/badge/startup-4.6%20ms-2bc4b2" alt="startup 4.6 ms">
+  <img src="https://img.shields.io/badge/no%20root-unprivileged-2bc4b2" alt="no root">
+  <img src="https://img.shields.io/badge/license-MIT-0e9c8c" alt="license">
+</p>
 
-> Portfolio/research note: this repository is the artifact behind a study on whether the
-> *form* of execution feedback (raw bytes vs. typed + delta) changes how many turns and how
-> much money a coding agent needs to fix C/C++/Rust/Python code. Token-level compression of
-> tool output is already commoditised (and independently shown not to reduce billed cost);
-> the bet here is different: **the executor owns the facts, so it should emit facts, and it
-> should be deterministic enough that "what changed since last run" is meaningful.**
+<p align="center">
+  <b>A coding agent reads 30 KB of stdout to find one faulting line. This hands it the line.</b><br>
+  A no-root Linux sandbox that owns the facts of a run — and emits them, plus what changed since last time.
+</p>
+
+<p align="center">
+  📘 <a href="docs/REPORT.md">Technical report</a> &nbsp;·&nbsp;
+  📊 <a href="docs/report.html">Styled report (HTML + figures)</a> &nbsp;·&nbsp;
+  🔬 <a href="research/">Research &amp; prior art</a>
+</p>
 
 ---
 
-## What it does
+An agent edits code, runs the tests, reads the result, edits again. The *reads the result* step is where
+the tokens go — **45–84 %** of a coding agent's context is tool output (measured across SWE-agent,
+Terminal-Bench and Claude Code). Every deployed harness shapes that output the same way: truncate the
+bytes. The obvious fix — regex-compress stdout (RTK and ~15 clones, 2026) — was independently shown **not
+to reduce billed cost**, because an agent that loses information spends extra *turns* re-discovering it.
 
+**sbx** takes a different position: the executor already knows whether the process crashed, what the
+sanitizer caught, which frame faulted, which tests failed and why. So it should emit **facts**, not bytes —
+and, because it sees consecutive runs, it should emit **what changed**. It runs your command in a ~4 ms
+throw-away sandbox (no root, no daemon, no Docker) and returns a typed **Verdict** + a **Delta** against the
+previous run.
+
+## See it in 30 seconds
+
+```bash
+sbx run --work /tmp/demo -- sh -c 'gcc -g -fsanitize=address overflow.c -o o && ./o'
 ```
-$ sbx run --work /tmp/demo -- sh -c 'gcc -g -fsanitize=address overflow.c -o overflow && ./overflow'
+```text
 [sbx] CRASH exit=1 wall=174ms raw=2820B
 crash: AddressSanitizer heap-buffer-overflow (WRITE of size 4)
+  hint: read/write past the end of a heap allocation — check the index/length at the frame below
   at /work/overflow.c:9 in fill
-  #0 fill /work/overflow.c:9
-  #1 main /work/overflow.c:16
-  #2 ? /usr/lib/x86_64-linux-gnu/libc.so.6+0x2a600
-  #3 __libc_start_main /usr/lib/x86_64-linux-gnu/libc.so.6+0x2a717
-  #4 _start /work/overflow+0x1184
   allocated at /work/overflow.c:14 in main
-  0x7c3ff68e0038 is located 0 bytes after 40-byte region [0x7c3ff68e0010,0x7c3ff68e0038)
 (full log available on request: sbx log)
 
-$ # ... the agent edits, re-runs:
-$ sbx run --work /tmp/demo -- sh -c 'gcc -g -fsanitize=address uaf.c -o uaf && ./uaf'
+# ... the agent edits and re-runs:
 [sbx] CRASH exit=1 wall=55ms raw=3327B
-delta: crash: moved heap-buffer-overflow @ /work/overflow.c:9 -> heap-use-after-free @ /work/uaf.c:15
-crash: AddressSanitizer heap-use-after-free (READ of size 4)
-  at /work/uaf.c:15 in sum
-  ...
-  allocated at /work/uaf.c:22 in main
-  freed at /work/uaf.c:26 in main
-
-$ sbx run --work /tmp/demo -- ./uaf
-[sbx] CRASH exit=1 wall=16ms raw=3327B
-delta: crash: SAME as last run (your change did not affect it)
+delta: crash moved heap-buffer-overflow @ overflow.c:9 -> heap-use-after-free @ uaf.c:15
 ```
 
-The 2.8 KB ASan report (shadow-byte dump, legend, runtime frames) becomes ~12 lines; the
-delta line is the most actionable sentence an agent can read after a re-run. Both come
-from deterministic parsers — no LLM in the loop, no lossy summarisation.
+The 2.8 KB ASan report (shadow-byte dump, legend, runtime frames) becomes ~5 lines; the `delta:` line is the
+most actionable sentence an agent can read after a re-run. Both come from deterministic parsers — **no LLM
+in the loop, no lossy summarisation.**
 
-Three crates, policy/mechanism split everywhere:
+## What it is
+
+<p align="center"><img src="docs/architecture.svg" alt="Spec → hermit-core → Outcome → feedback → Verdict, policy/mechanism split across three crates" width="100%"></p>
 
 | Crate | Role |
 |---|---|
-| `hermit-core` | The mechanism. `clone(2)` into fresh **user / pid / mount / net / uts / ipc / cgroup** namespaces, tmpfs root with read-only host binds, fresh `/proc`, minimal `/dev`, read-only `/sys`, `pivot_root`, rlimits, best-effort cgroup v2, `no_new_privs`, `ADDR_NO_RANDOMIZE`, fixed environment profile. No root, no daemon, no Docker. Every `Outcome` carries an `Applied` record saying exactly which isolation features held, so experiments are self-describing. |
-| `feedback` | The policy. `distill(stdout, stderr, facts) -> Verdict` (sanitizers → `Crash`, gcc/clang/rustc → `Diagnostic`s, pytest/cargo-test/ctest/gtest → `Tests`, Python tracebacks, bare signals), `diff(prev, cur) -> Delta` with line-shift-tolerant matching, and a stable text `render`. Pure functions, fixture-tested. |
-| `sbx-cli` | `sbx run | verdict | selftest | bench`. `run` persists the last verdict under `<work>/.sbx/` so the next run prints a delta automatically; `--json` gives the full machine-readable outcome. |
+| **`hermit-core`** | The mechanism. `clone(2)` into fresh **user / pid / mount / net / uts / ipc / cgroup** namespaces, tmpfs root with read-only host binds, `pivot_root`, seccomp-bpf denylist, loopback up via raw netlink, rlimits, best-effort cgroup v2, `no_new_privs`, `ADDR_NO_RANDOMIZE`, fixed environment. No root, no daemon. Every `Outcome` carries an `Applied` record saying exactly which isolation held. |
+| **`feedback`** | The policy. `distill(stdout, stderr, facts) -> Verdict` (sanitizers → `Crash`, gcc/clang/rustc → `Diagnostic`s, pytest/cargo-test/ctest/gtest → `Tests`, tracebacks, signals), `diff(prev, cur) -> Delta` with line-shift-tolerant matching, and a stable text `render`. Pure functions, fixture-tested. |
+| **`sbx-cli`** | `sbx run \| verdict \| selftest \| bench`. `run` persists the last verdict under `<work>/.sbx/` so the next run prints a delta automatically; `--json` gives the full machine-readable outcome. |
 
-## Why this and not "compress stdout"
+## The main result: same fix, far less context
 
-- Tool output is 45–84 % of a coding agent's tokens (SWE-agent, Terminal-Bench, Claude Code
-  measurements, 2025–2026). Everyone agrees it is the problem.
-- Regex/line compressors of shell output (RTK and ~15 clones, 2026) are the obvious fix and
-  two independent studies found they **do not reduce billed cost** (prompt-cache economics;
-  agents take more turns to re-discover what was cut).
-- No sandbox or agent harness we could find (E2B, Modal, Daytona, Docker Sandboxes, Claude Code,
-  Codex, Gemini CLI, OpenHands, Terminus…) parses compiler/sanitizer/test output into
-  structure, and none computes deltas between runs.
-- So the hypothesis under test is not "fewer bytes" but **"fewer turns"**: typed facts + deltas
-  should cut iterations-to-fix, which is what actually drives cost. The experiment design,
-  baselines (observation masking, RTK-style compression, head/tail truncation as in Claude
-  Code/Codex) and the literature behind all of the above live in `research/`.
+<p align="center"><img src="docs/context-reduction.svg" alt="Per task, raw stdout vs the typed verdict on a log scale — 7 to 20x fewer characters" width="100%"></p>
 
-## Status
+On a run-before-edit control (Claude Sonnet 4.6, driven through the Claude Code CLI — **no API key**), the
+typed verdict shows the model **7–20× fewer characters** at **equal success and equal turns** — the "same
+outcome, far less context" that byte-compression is provably unable to deliver. Tool output is most of an
+agent's context; compressing it 7–20× frees a large share of the window. On a weak local model
+(Qwen2.5-Coder 3B) the typed verdict also lifts success where raw fails (**0 → 3/12**).
 
-Working today (Linux; verified on WSL2 6.6 and stock Ubuntu, unprivileged):
+## The experiment that refuted our own hypothesis
 
-- [x] Namespaced sandbox with `pivot_root`, ro host system dirs, rw `/work`, `/tmp`, `/dev`, `/proc`, ro `/sys`
-- [x] Hermetic profile: fixed env (`LC_ALL=C.UTF-8`, `TZ=UTC`, `SOURCE_DATE_EPOCH`, `PYTHONHASHSEED=0`, `ASAN_OPTIONS`…), hostname, no ASLR, `no_new_privs`, no network by default
-- [x] Limits: wall timeout (SIGKILL of the pid-namespace init), RLIMIT_CPU/NOFILE/FSIZE/NPROC, core dumps off; cgroup v2 `memory.max`/`pids.max` when a delegated cgroup exists (reported otherwise)
-- [x] Parsers: AddressSanitizer (+alloc/free stacks), UBSan, gcc/clang, rustc, pytest, cargo test, ctest/gtest, Python tracebacks, bare signals
-- [x] Delta: diagnostics fixed/new/unchanged (±3-line tolerant), tests fixed/broken/still-failing, crash gone/new/moved/same
-- [x] `sbx selftest` (isolation checks), `sbx bench` (startup latency), CI with fmt + clippy `-D warnings` + tests
-- [x] seccomp-bpf denylist (`seccompiler`, EPERM): `io_uring_*`, `bpf`, `ptrace`, `perf_event_open`, `userfaultfd`, `keyctl`, `mount`/`unshare`/`setns`/`pivot_root`/`chroot`, `personality`, clock setters, `socket(AF_ALG…)` and ~40 exotic families — verified from inside: `unshare -U` → EPERM, `mount` → EPERM, AF_ALG → EPERM, ASan/gcc/python unaffected
-- [x] Loopback UP inside the netns via raw netlink (no `ip` binary): `127.0.0.1` connect → ECONNREFUSED, listen+connect works, `1.1.1.1` → ENETUNREACH
-- [x] Claude Code PostToolUse hook adapter (`adapters/claude-code/`), contract verified, e2e-tested
-- [x] Experiment harness (`bench/`): instrumented agent on the official Anthropic SDK with six feedback conditions (raw / Claude-Code-style 30k truncation / Codex-style 10 KiB / RTK-style regex / structured / structured+delta) + observation masking, cache-aware cost accounting, independent success verification; resumable runner with summary table; **fourteen validated tasks** — C/C++ memory-safety (heap overflow, use-after-free, stack overflow, double free, NULL deref, vector OOB, a 24-guard "haystack", a 3-bug cascade), a C compile-error task, UBSan signed overflow, Rust index panic, and three Python unittest — buggy fails / solution passes under sbx; mock-mode smoke test (48/48) + Python/Rust renderer parity on all fixtures
-- [x] Pilots run: Qwen2.5-Coder 3B/7B (Ollama) and **Claude Sonnet 4.6 via the Claude Code CLI (no API key)**, including a causal verdict-corruption study (`docs/REPORT.md` §6.7)
-- [ ] Real-world-scale repair (SEC-bench / ARVO / multi-file) — where a frontier model must iterate, to measure the turn/cost win on strong models
-- [ ] Landlock stacking (ABI-detect; WSL2 6.6 = V4)
-- [ ] NEWTIME offsets, seeded `getrandom` via seccomp-notify
-- [ ] mini-SWE-agent adapter, Harbor backend
+We set out to show typed feedback cuts an agent's *turns*. It doesn't — not on a frontier model — and finding
+out *why* is the most interesting result in the study. We built a **causal** test: hold the sandbox execution
+**byte-identical** and corrupt **only** the verdict the model is shown — surgically move the reported fault
+line to a plausible, causally-inert decoy, rewritten consistently across the crash frame, stack, tail and
+diagnostics so the lie has no tell. Then read out which line the agent's **first edit** actually changes.
 
-## Results so far (honest summary; details in `docs/REPORT.md` §6)
+<p align="center"><img src="docs/steer.svg" alt="Across five tasks the agent's first edit lands on the true fix; the decoy the verdict pointed at is never touched" width="100%"></p>
 
-- **Determinism:** under the hermetic profile the failing output of 4 sanitizer tasks is
-  byte-identical across 40/40 runs; with ASLR on, 0/40 (and crash identity drifted too until it was
-  made address-free). Deltas need the profile.
-- **Containment / localization / fuzz / hook:** 29/29 escape probes contained; the verdict points at
-  the ground-truth faulting line on 10/10 tasks; 300 mutated inputs, 0 failures, 4.5 ms/call; hook
-  verified live inside a real Claude Code session (2 647 → 544 bytes, 114 ms).
-- **Context reduction — the main token/memory win.** On a run-before-edit control (Claude Sonnet 4.6,
-  driven through the Claude Code CLI, *no API key*), the typed verdict shows the model **7× fewer
-  characters on average, up to 20×** (use-after-free 17 949 → 1 515; C++ vector OOB 36 302 → 1 836) at
-  **equal success and equal turns** — the "same outcome, far less context" that byte-compression is
-  shown *not* to deliver. On Qwen-3B, raw 0/12 → typed+delta 3/12 at 40.8 k → 17.5 k input tokens.
-- **Feedback is a lever at the margin of capability.** A frontier model fixes short single-file bugs
-  from source and never runs the buggy code, so feedback *form* is irrelevant there; the weak 3B model,
-  which cannot fix from source, is where the typed verdict moves success (0 → 3/12). Turn- and
-  cost-reductions therefore concentrate on weaker models and on tasks too large to fix from a glance
-  (real-world-scale repair — SEC-bench/ARVO — is the next experiment).
-- **The agent verifies, it doesn't trust (a causal result).** Holding execution byte-identical and
-  corrupting *only* the shown verdict, Claude Sonnet 4.6 is **0/7 steered** across five tasks —
-  including a 24-guard "haystack" built to force reliance on the verdict — never following a fabricated
-  fault line or crash class; it repairs the real bug from source, even with **no feedback at all**. So a
-  corrupted or nondeterministic verdict can mislead an agent only where it cannot self-verify — exactly
-  where a *correct*, deterministic verdict matters most (see `docs/REPORT.md` §6.7).
+Across five tasks — including a 24-guard "haystack" built specifically to force reliance on the verdict —
+Claude Sonnet 4.6 is **0/7 steered**. It never follows the fabricated line (or a fabricated crash *class*); it
+repairs the real bug **from source**, succeeding even with **no feedback at all**. The executor's localization
+is not load-bearing here, so corrupting it is inert — the frontier model *verifies*, it does not *trust*.
 
-## Report
+That is the boundary, stated as a law: **a corrupted or nondeterministic verdict can mislead an agent only
+where it cannot independently verify from source** — which is exactly the regime typed feedback targets
+(large repos, memory bugs whose crash site is far from the cause), and exactly where a *correct*,
+deterministic verdict matters most. The full causal design, statistics and threats to validity are in
+[`docs/REPORT.md` §6.7](docs/REPORT.md).
 
-The full design-and-measurement write-up (abstract → methodology → evaluation → threats), in the
-style of a technical report, is `docs/REPORT.md`; `docs/report.html` is the same with figures
-inlined (regenerate with `bench/agent/plot.py` + `bench/agent/build_report_html.py`). Experiment
-outputs live in `bench/out/` (`startup_bench.md`, `determinism.md`, `pilot-*.jsonl`, `figs/`).
+## Determinism is the precondition, not decoration
 
-## Numbers (this machine: WSL2, kernel 6.6, 12 cores)
+A delta is meaningless if addresses move with ASLR, test order with scheduling, and messages with locale. So
+the executor is **hermetic** — and it is measurable: under the hermetic profile the failing output of four
+sanitizer tasks is **byte-identical across 40/40 runs**; with ASLR on, **0/40** (and crash identity itself
+drifted until it was made address-free). This is why the feedback lives *inside* the executor, not in a
+post-hoc filter that never sees two runs.
 
-`sbx bench --n 30` — sandboxed `/bin/true` vs. plain `spawn`:
+## What's inside — the concepts on display
 
-| | min | median | p90 |
-|---|---|---|---|
-| sandboxed (namespaces + pivot_root + mounts + netlink `lo` up + seccomp) | 4.06 ms | **4.59 ms** | 4.83 ms |
-| same without seccomp/loopback | 3.89 ms | 4.15 ms | 4.50 ms |
-| setup → exec inside the child | | 2.0 ms | |
-| plain `Command::new("/bin/true")` | 0.54 ms | 0.56 ms | 0.70 ms |
+| Concept | Where it lives |
+|---|---|
+| **Unprivileged Linux sandboxing** | `hermit-core` — namespaces + tmpfs root + ro host binds + `pivot_root`, all as a normal user |
+| **seccomp-bpf syscall filtering** | `crates/hermit-core/src/seccomp.rs` — EPERM denylist: `io_uring`, `bpf`, `ptrace`, `mount`, `AF_ALG`, ~40 families |
+| **Netlink by hand** | `netlink.rs` — brings loopback `UP` inside the net namespace with no `ip` binary |
+| **Deterministic execution** | fixed env, no ASLR, frozen clock/seed — the precondition for run-to-run deltas |
+| **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, tracebacks, signals |
+| **Differential feedback** | `feedback/src/delta.rs` — line-shift-tolerant diff of two runs (crash moved / SAME, tests fixed / broken) |
+| **Causal experiment design** | `bench/` — byte-identical execution, single-field verdict corruption, first-edit-locus readout, matched controls |
+| **Three-tier agent harness** | `bench/agent/agent.py` — Anthropic SDK · Ollama · Claude Code CLI backends, cache-aware cost accounting |
+| **Property / fuzz testing** | 300 mutated inputs → 0 failures; 17 unit/integration tests; `clippy -D warnings` clean |
 
-For scale: Docker `run` is typically 100–500 ms, gVisor +40–150 ms, Firecracker 125–200 ms cold /
-5–30 ms from snapshot (published vendor/blog numbers — see research report). Four milliseconds
-means the sandbox can wrap *every* compile/test invocation without anyone noticing.
-
-## Build & test
-
-```bash
-cargo test --workspace
-cargo run -p sbx-cli -- selftest          # prints what isolation held on this kernel
-cargo run -p sbx-cli -- bench --n 30
-cargo run -p sbx-cli -- run --work /tmp/x -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
-cargo run -p sbx-cli -- run --work /tmp/x --json -- pytest -q     # full outcome + verdict + delta
-cargo run -p sbx-cli -- verdict --raw some.log --exit 1            # distil an existing log
-```
-
-Requirements: Linux with unprivileged user namespaces (default on Ubuntu/Fedora/WSL2). On WSL2,
-cgroup limits need a delegated cgroup (systemd user session); without it `sbx` says so in
-`applied.cgroup` and falls back to rlimits. Building on Windows: develop in WSL2 and point
-`CARGO_TARGET_DIR` at a native path for speed.
-
-## Design notes
-
-**Every outcome is self-describing.** `Outcome.applied` lists the namespaces, `pivot_root`,
-`no_new_privs`, ASLR state, rlimits and the cgroup leaf (or the reason there is none). An
-experiment can therefore be filtered by isolation level after the fact instead of trusting a
-README.
-
-**Read-only binds in a user namespace keep the lock flags.** Remounting a bind read-only while
-dropping `nosuid/nodev/noexec/*atime` fails with `EPERM` in a userns; `hermit-core` reads the
-source's `statvfs` flags and carries them into the remount. This is the #1 reason home-grown
-sandboxes "work as root, fail as user".
-
-**No `RLIMIT_AS` by default.** AddressSanitizer reserves ~20 TB of virtual address space and dies
-under an address-space limit; memory must be bounded by the cgroup, not the rlimit (the option
-exists for non-sanitized runs).
-
-**Deltas are line-shift tolerant.** A diagnostic is "the same" if tool, file and normalised
-message match and the line moved ≤3 — an edit above the error must not turn it into
-"1 fixed, 1 new". Crash identity is (kind, first user frame ±3 lines).
-
-**The parsers never invent.** Unclaimed lines go to a short tail; the full log is always kept in
-`<work>/.sbx/last.stderr` and can be requested. Deterministic parsers make the rendered verdict
-stable across runs — which is what lets a diff of two renderings be readable too.
-
-## Layout
+## How it's built
 
 ```
 sandbox-executor/
 ├── crates/
 │   ├── hermit-core/   # lib.rs (Spec/Outcome/run), child.rs (ns + mounts + exec), cgroup.rs, seccomp.rs, netlink.rs
 │   ├── feedback/      # lib.rs (Verdict types), parse.rs, delta.rs, render.rs, tests/fixtures/
-│   └── sbx-cli/       # sbx binary
+│   └── sbx-cli/       # the sbx binary
 ├── adapters/claude-code/  # PostToolUse hook + settings example
-├── bench/             # experiment harness: agent/, tasks/, scripts/ (see bench/README.md); demo/ = the examples above
-└── docs/              # verdict-schema.md, hermetic-profile.md, paper/outline.md
+├── bench/             # experiment harness: agent/, tasks/ (14 validated), scripts/ (steer_run, steer_analyze, plot)
+├── docs/              # REPORT.md + report.html (the write-up), verdict-schema.md, hermetic-profile.md, figures
+└── research/          # prior-art survey, round-2 synthesis, the literature behind every claim
 ```
 
-MIT.
+## Build &amp; test
+
+```bash
+cargo test --workspace                    # 17 tests
+cargo run -p sbx-cli -- selftest          # prints what isolation held on this kernel
+cargo run -p sbx-cli -- bench --n 30      # startup latency
+cargo run -p sbx-cli -- run --work /tmp/x -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
+cargo run -p sbx-cli -- run --work /tmp/x --json -- pytest -q     # full outcome + verdict + delta
+```
+
+Requirements: Linux with unprivileged user namespaces (default on Ubuntu / Fedora / WSL2). On WSL2, cgroup
+limits need a delegated cgroup (systemd user session); without it `sbx` says so in `applied.cgroup` and falls
+back to rlimits. Building on Windows: develop in WSL2 and point `CARGO_TARGET_DIR` at a native path for speed.
+
+## Status &amp; what's next
+
+Working today (verified on WSL2 6.6 and stock Ubuntu, unprivileged): the sandbox, the hermetic profile,
+seccomp + loopback, the parsers and delta, the Claude Code hook, the three-tier harness, 14 validated
+C/C++/Rust/Python repair tasks, and the causal study above. The open frontier is **real-world-scale repair**
+(SEC-bench / ARVO / multi-file), where a strong model *must* iterate — the regime in which the turn- and
+cost-reductions this design predicts become measurable on a frontier model.
+
+---
+
+MIT. Built as a systems + ML-research portfolio piece; the reasoning and every cited number live in
+[`docs/REPORT.md`](docs/REPORT.md).

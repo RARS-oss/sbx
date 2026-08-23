@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif"><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#12221f"/><stop offset="1" stop-color="#0d1719"/></linearGradient><linearGradient id="acc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2bc4b2"/><stop offset="1" stop-color="#63e0cf"/></linearGradient></defs><rect x="1" y="1" width="1198" height="298" rx="20" fill="url(#bg)" stroke="#24363b" stroke-width="1.5"/>
+<text x="40" y="44" fill="#2bc4b2" font-size="14" font-weight="600" letter-spacing="3">POLICY / MECHANISM SPLIT · THREE CRATES</text>
+<rect x="40" y="90" width="205" height="150" rx="10" fill="#16262a" stroke="#9fb4ba" stroke-opacity="0.55"/>
+<text x="142" y="122" fill="#9fb4ba" font-size="19" font-weight="700" text-anchor="middle" font-family="monospace">Spec</text>
+<text x="142" y="148" fill="#9fb4ba" font-size="12.5" text-anchor="middle">command +</text>
+<text x="142" y="165" fill="#9fb4ba" font-size="12.5" text-anchor="middle">isolation profile</text>
+<text x="257" y="173" fill="#2bc4b2" font-size="24" text-anchor="middle" font-weight="700">→</text>
+<rect x="269" y="90" width="205" height="150" rx="10" fill="#16262a" stroke="#2bc4b2" stroke-opacity="0.55"/>
+<text x="371" y="122" fill="#2bc4b2" font-size="19" font-weight="700" text-anchor="middle" font-family="monospace">hermit-core</text>
+<text x="371" y="148" fill="#9fb4ba" font-size="12.5" text-anchor="middle">clone() into user/pid/mount/net</text>
+<text x="371" y="165" fill="#9fb4ba" font-size="12.5" text-anchor="middle">ns · pivot_root · seccomp · lo up</text>
+<text x="371" y="182" fill="#9fb4ba" font-size="12.5" text-anchor="middle">no ASLR · rlimits · 4 ms</text>
+<text x="486" y="173" fill="#2bc4b2" font-size="24" text-anchor="middle" font-weight="700">→</text>
+<rect x="498" y="90" width="205" height="150" rx="10" fill="#16262a" stroke="#9fb4ba" stroke-opacity="0.55"/>
+<text x="600" y="122" fill="#9fb4ba" font-size="19" font-weight="700" text-anchor="middle" font-family="monospace">Outcome</text>
+<text x="600" y="148" fill="#9fb4ba" font-size="12.5" text-anchor="middle">exit / signal / timeout</text>
+<text x="600" y="165" fill="#9fb4ba" font-size="12.5" text-anchor="middle">rusage · streams · Applied{}</text>
+<text x="714" y="173" fill="#2bc4b2" font-size="24" text-anchor="middle" font-weight="700">→</text>
+<rect x="726" y="90" width="205" height="150" rx="10" fill="#16262a" stroke="#2bc4b2" stroke-opacity="0.55"/>
+<text x="829" y="122" fill="#2bc4b2" font-size="19" font-weight="700" text-anchor="middle" font-family="monospace">feedback</text>
+<text x="829" y="148" fill="#9fb4ba" font-size="12.5" text-anchor="middle">parse: sanitizer · gcc/clang/rustc</text>
+<text x="829" y="165" fill="#9fb4ba" font-size="12.5" text-anchor="middle">pytest/cargo · tracebacks</text>
+<text x="829" y="182" fill="#9fb4ba" font-size="12.5" text-anchor="middle">diff(prev,cur) → Delta</text>
+<text x="943" y="173" fill="#2bc4b2" font-size="24" text-anchor="middle" font-weight="700">→</text>
+<rect x="955" y="90" width="205" height="150" rx="10" fill="#16262a" stroke="#63e0cf" stroke-opacity="0.55"/>
+<text x="1058" y="122" fill="#63e0cf" font-size="19" font-weight="700" text-anchor="middle" font-family="monospace">Verdict</text>
+<text x="1058" y="148" fill="#9fb4ba" font-size="12.5" text-anchor="middle">crash · diagnostics · tests</text>
+<text x="1058" y="165" fill="#9fb4ba" font-size="12.5" text-anchor="middle">+ what changed since last run</text>
+<text x="40" y="280" fill="#9fb4ba" font-size="14">The executor owns the facts, so it emits <tspan fill="#eaf3f2">facts</tspan>; because it sees consecutive runs, it emits <tspan fill="#eaf3f2">what changed</tspan>. Deterministic parsers, no LLM in the loop.</text>
+</svg>
