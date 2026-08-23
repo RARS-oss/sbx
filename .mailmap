@@ -1,5 +1,0 @@
-# Coalesce all authorship under the RARS-oss GitHub account (id 319612030).
-# Folds the old RarProd1000 <redacted@example.invalid> identity into RARS-oss so the
-# Contributors graph and blame show a single account. Non-destructive (no history rewrite).
-RARS-oss <319612030+RARS-oss@users.noreply.github.com>
-RARS-oss <319612030+RARS-oss@users.noreply.github.com> <redacted@example.invalid>
