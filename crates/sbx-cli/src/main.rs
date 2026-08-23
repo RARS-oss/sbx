@@ -110,6 +110,16 @@ enum Cmd {
         #[arg(long, default_value_t = 30)]
         n: u32,
     },
+    /// Show the run-memory for a work dir: the timeline of runs, and how each crash / diagnostic /
+    /// test evolved across them (appeared, moved, fixed, or stuck). Reads <work>/.sbx/history.jsonl.
+    History {
+        /// Work directory whose .sbx run-memory to read (default: cwd).
+        #[arg(long)]
+        work: Option<PathBuf>,
+        /// Emit the raw run records as JSON instead of the summary.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -207,6 +217,7 @@ fn main() -> Result<()> {
                     .and_then(|b| serde_json::from_slice(&b).ok())
             };
             let delta = prev.as_ref().map(|p| feedback::diff(p, &verdict));
+            let mut signals = feedback::LoopSignals::default();
             if !no_delta {
                 let _ = std::fs::create_dir_all(&state_dir);
                 let _ = std::fs::write(
@@ -215,6 +226,9 @@ fn main() -> Result<()> {
                 );
                 let _ = std::fs::write(state_dir.join("last.stdout"), &outcome.stdout);
                 let _ = std::fs::write(state_dir.join("last.stderr"), &outcome.stderr);
+                // run-memory: append this run to <work>/.sbx/history.jsonl and derive the
+                // anti-loop signals (the `loop:` lines) from the last N runs.
+                signals = feedback::record_run(&state_dir, &verdict);
             }
 
             if json {
@@ -226,8 +240,14 @@ fn main() -> Result<()> {
                     /// The compact rendered verdict text — so a consumer (e.g. the MCP server) gets
                     /// both the typed object and the human/agent-facing summary from one run.
                     rendered: String,
+                    /// Anti-loop signals from the run-memory (empty when there is nothing to warn about).
+                    loop_signals: &'a feedback::LoopSignals,
                 }
-                let rendered = feedback::render(&verdict, delta.as_ref(), &RenderOpts::default());
+                let rendered = format!(
+                    "{}{}",
+                    feedback::render(&verdict, delta.as_ref(), &RenderOpts::default()),
+                    signals.render()
+                );
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&Full {
@@ -235,6 +255,7 @@ fn main() -> Result<()> {
                         verdict: &verdict,
                         delta: &delta,
                         rendered,
+                        loop_signals: &signals,
                     })?
                 );
             } else if raw {
@@ -255,6 +276,7 @@ fn main() -> Result<()> {
                     );
                 }
                 print!("{}", feedback::render(&verdict, delta.as_ref(), &opts));
+                print!("{}", signals.render());
             }
             std::process::exit(match outcome.exit {
                 ExitKind::Code { code } => code,
@@ -315,6 +337,19 @@ fn main() -> Result<()> {
         }
         Cmd::Selftest => selftest(),
         Cmd::Bench { n } => bench(n),
+        Cmd::History { work, json } => {
+            let work = match work {
+                Some(w) => w,
+                None => std::env::current_dir()?,
+            };
+            let hist = feedback::history::load(&work.join(".sbx"));
+            if json {
+                println!("{}", serde_json::to_string_pretty(&hist)?);
+            } else {
+                print!("{}", feedback::summarize(&hist));
+            }
+            Ok(())
+        }
     }
 }
 

@@ -37,6 +37,7 @@ class SbxResult(TypedDict):
     diagnostics: list[dict[str, Any]]      # [{tool, severity, file, line, message, scope}, ...]
     tests: Optional[dict[str, Any]]        # {runner, passed, failed, failures[]}
     delta: Optional[dict[str, Any]]        # what changed vs the previous run in this dir
+    loop_signals: Optional[dict[str, Any]] # anti-loop: {runs, verdict_streak, stuck[]} — "you're circling"
 
 
 def _to_wsl_path(p: str) -> str:
@@ -76,7 +77,7 @@ def sbx_run(command: str, cwd: str | None = None, timeout: int = 120) -> str:
 
 def _err_result(rendered: str) -> SbxResult:
     return {"status": "error", "exit_code": None, "rendered": rendered,
-            "crash": None, "diagnostics": [], "tests": None, "delta": None}
+            "crash": None, "diagnostics": [], "tests": None, "delta": None, "loop_signals": None}
 
 
 def sbx_run_json(command: str, cwd: str | None = None, timeout: int = 120) -> SbxResult:
@@ -104,6 +105,7 @@ def sbx_run_json(command: str, cwd: str | None = None, timeout: int = 120) -> Sb
         "diagnostics": v.get("diagnostics", []),
         "tests": v.get("tests"),
         "delta": full.get("delta"),
+        "loop_signals": full.get("loop_signals"),
     }
 
 
@@ -138,10 +140,12 @@ def main() -> None:
     def run(command: str, cwd: str = "", timeout: int = 120) -> SbxResult:
         """Run a shell command (build/test/execute) in a hermetic, deterministic sbx sandbox and
         return a TYPED verdict as structured data — {status, crash{kind,first_user_frame,offset,...},
-        diagnostics[], tests{}, delta{}, rendered} — so you read the error as an object, not a text
-        blob. `delta` is what changed vs your previous run in the same directory ("crash SAME",
-        "2 tests fixed, 1 new"). `rendered` is the compact human-facing summary. Prefer this over
-        reading raw stdout.
+        diagnostics[], tests{}, delta{}, loop_signals{}, rendered} — so you read the error as an object,
+        not a text blob. `delta` is what changed vs your previous run in the same directory ("crash SAME",
+        "2 tests fixed, 1 new"). `loop_signals` is the anti-loop guard drawn from run-memory: it warns
+        when you are circling — the same verdict N runs in a row, or a crash/diagnostic that has survived
+        several edits (likely a red herring, not the fix site). `rendered` is the compact human-facing
+        summary. Prefer this over reading raw stdout.
 
         command: the shell command to run (e.g. "cargo test", "pytest -q", "go test ./...").
         cwd:     working directory (default: SBX_WORK or the server's cwd).

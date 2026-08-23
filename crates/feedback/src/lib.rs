@@ -12,6 +12,7 @@
 //! "tail" so the agent can still ask for the full log.
 
 pub mod delta;
+pub mod history;
 pub mod parse;
 pub mod render;
 pub mod scope;
@@ -19,6 +20,7 @@ pub mod scope;
 use serde::{Deserialize, Serialize};
 
 pub use delta::{diff, Delta};
+pub use history::{record_run, summarize, LoopSignals, RunRecord};
 pub use render::{render, RenderOpts};
 pub use scope::enrich_scopes;
 

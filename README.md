@@ -237,6 +237,14 @@ Ordered by value × tractability. Items marked † were independently recommende
   [Install](#install) and [`docs/RELEASING.md`](docs/RELEASING.md).
 
 **Sharper feedback.**
+- **Run-memory & anti-loop signals — shipped** (`feedback/src/history.rs`, `sbx history`). Beyond the
+  one-step delta, sbx keeps a per-work-dir **history of runs** (`.sbx/history.jsonl`) keyed by *scope-stable*
+  crash/diagnostic identities, and derives **anti-loop signals** — `loop: 3 runs in a row with the SAME
+  verdict — recent edits changed nothing` and `loop: heap-use-after-free @ sum() has survived 4 runs —
+  likely a red herring, not the fix site`. `sbx history` prints the timeline + per-problem evolution
+  ("appeared run 2, fixed since run 6"). This is the executor as **external execution memory** — something a
+  strong model can't reconstruct from a single stdout (it never sees its own past runs), and a red-herring
+  guard raw output can't give. Surfaced in the CLI, `sbx run --json` (`loop_signals`), and the MCP `run` tool.
 - **Tree-sitter semantic deltas — shipped for C, C++, Rust, Python, Go** (`feedback/src/scope.rs`). † Each
   diagnostic is AST-enriched with its enclosing function; the delta matches by *scope* so a diagnostic (or a
   whole stack frame) survives a refactor that moves its line far — a ±3-line window would call it "1 fixed +
