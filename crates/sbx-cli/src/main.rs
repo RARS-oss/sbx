@@ -80,6 +80,11 @@ enum Cmd {
         /// Do not read/write <work>/.sbx/last.json (no delta).
         #[arg(long)]
         no_delta: bool,
+        /// Run the command DIRECTLY instead of in the hermetic sandbox (for restricted containers /
+        /// CI where unprivileged user namespaces are blocked). Still distills the typed verdict,
+        /// delta and run-memory; the result is honestly labelled as un-isolated (applied.* = false).
+        #[arg(long)]
+        no_sandbox: bool,
         /// Command and arguments.
         #[arg(last = true, required = true)]
         argv: Vec<String>,
@@ -141,6 +146,7 @@ fn main() -> Result<()> {
             json,
             raw,
             no_delta,
+            no_sandbox,
             argv,
         } => {
             let work = work.unwrap_or(std::env::current_dir()?);
@@ -172,7 +178,11 @@ fn main() -> Result<()> {
                 use std::collections::BTreeMap;
                 let mut groups: BTreeMap<String, (Vec<u32>, String)> = BTreeMap::new();
                 for i in 1..=repeat {
-                    let outcome = hermit_core::run(&spec)?;
+                    let outcome = if no_sandbox {
+                        hermit_core::run_direct(&spec)?
+                    } else {
+                        hermit_core::run(&spec)?
+                    };
                     let facts = facts_of(&outcome);
                     let mut v = feedback::distill(&outcome.stdout, &outcome.stderr, &facts);
                     feedback::enrich_scopes(&mut v, &work);
@@ -201,7 +211,11 @@ fn main() -> Result<()> {
                 }
                 return Ok(());
             }
-            let outcome = hermit_core::run(&spec)?;
+            let outcome = if no_sandbox {
+                hermit_core::run_direct(&spec)?
+            } else {
+                hermit_core::run(&spec)?
+            };
             let facts = facts_of(&outcome);
             let mut verdict = feedback::distill(&outcome.stdout, &outcome.stderr, &facts);
             // AST-enrich each diagnostic with its enclosing function (from the sources in <work>),

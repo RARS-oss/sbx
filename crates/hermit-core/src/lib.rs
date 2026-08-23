@@ -470,6 +470,140 @@ fn tv_ms(tv: libc::timeval) -> u64 {
     (tv.tv_sec as u64) * 1000 + (tv.tv_usec as u64) / 1000
 }
 
+/// Run `spec.argv` DIRECTLY, with no sandbox — for restricted containers where unprivileged user
+/// namespaces are blocked (e.g. many rented GPU pods / CI runners). Captures stdout/stderr with a
+/// wall-clock timeout and applies the fixed-env profile if requested; everything the verdict layer
+/// needs is produced. `applied` reports all-false so results stay honestly labelled as un-isolated.
+pub fn run_direct(spec: &Spec) -> Result<Outcome> {
+    use std::io::Write;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Command, Stdio};
+
+    if spec.argv.is_empty() {
+        return Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "empty argv",
+        )));
+    }
+    let cap = spec.limits.capture_bytes;
+    let mut cmd = Command::new(&spec.argv[0]);
+    cmd.args(&spec.argv[1..])
+        .current_dir(&spec.work_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if spec.hermetic.fixed_env {
+        cmd.env_clear()
+            .env(
+                "PATH",
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            )
+            .env("HOME", &spec.work_dir)
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .env("TZ", "UTC")
+            .env("TERM", "dumb")
+            .env("PYTHONHASHSEED", "0")
+            .env(
+                "SOURCE_DATE_EPOCH",
+                spec.hermetic.source_date_epoch.to_string(),
+            );
+    }
+    for (k, v) in &spec.env {
+        cmd.env(k, v);
+    }
+
+    let t0 = Instant::now();
+    let mut child = cmd.spawn().map_err(Error::Io)?;
+    match child.stdin.take() {
+        Some(mut si) if !spec.stdin.is_empty() => {
+            let _ = si.write_all(&spec.stdin);
+        }
+        _ => {}
+    }
+    let mut so = child.stdout.take().expect("piped stdout");
+    let mut se = child.stderr.take().expect("piped stderr");
+    let ot = std::thread::spawn(move || read_capped(&mut so, cap));
+    let et = std::thread::spawn(move || read_capped(&mut se, cap));
+
+    let deadline = t0 + spec.limits.wall;
+    let mut timed_out = false;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break Some(st),
+            Ok(None) => {}
+            Err(e) => return Err(Error::Io(e)),
+        }
+        if Instant::now() >= deadline {
+            timed_out = true;
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let wall_ms = t0.elapsed().as_millis() as u64;
+    let (stdout, stdout_truncated) = ot.join().unwrap_or((Vec::new(), false));
+    let (stderr, stderr_truncated) = et.join().unwrap_or((Vec::new(), false));
+
+    let exit = if timed_out {
+        ExitKind::Timeout { after_ms: wall_ms }
+    } else {
+        let st = status.expect("status present when not timed out");
+        if let Some(code) = st.code() {
+            ExitKind::Code { code }
+        } else {
+            let sig = st.signal().unwrap_or(0);
+            ExitKind::Signal {
+                signal: sig,
+                name: Signal::try_from(sig)
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_else(|_| format!("SIG{sig}")),
+                core_dumped: st.core_dumped(),
+            }
+        }
+    };
+
+    Ok(Outcome {
+        exit,
+        wall_ms,
+        rusage: Rusage::default(),
+        stdout,
+        stderr,
+        stdout_truncated,
+        stderr_truncated,
+        applied: Applied {
+            cgroup: "n/a (--no-sandbox: ran directly, nothing isolated)".into(),
+            ..Default::default()
+        },
+        setup_ms: 0,
+    })
+}
+
+fn read_capped<R: std::io::Read>(r: &mut R, cap: usize) -> (Vec<u8>, bool) {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 65536];
+    let mut truncated = false;
+    loop {
+        match r.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                if buf.len() < cap {
+                    let take = n.min(cap - buf.len());
+                    buf.extend_from_slice(&chunk[..take]);
+                    if take < n {
+                        truncated = true;
+                    }
+                } else {
+                    truncated = true;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    (buf, truncated)
+}
+
 fn spawn_reader(fd: OwnedFd, cap: usize) -> std::thread::JoinHandle<(Vec<u8>, bool)> {
     std::thread::spawn(move || {
         // SAFETY: we own the fd; File takes ownership.
