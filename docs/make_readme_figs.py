@@ -36,7 +36,7 @@ def banner():
     s.append('</g>')
     s.append(f'<text x="56" y="66" fill="{TEAL}" font-size="15" font-weight="600" letter-spacing="4">RUST · HERMETIC SANDBOX · TYPED AGENT FEEDBACK</text>')
     s.append(f'<text x="52" y="150" fill="{INK}" font-size="86" font-weight="800" letter-spacing="-2">sbx</text>')
-    s.append(f'<text x="180" y="150" fill="{MUT}" font-size="26" font-weight="600">a hermetic executor for coding agents</text>')
+    s.append(f'<text x="232" y="150" fill="{MUT}" font-size="26" font-weight="600">a hermetic executor for coding agents</text>')
     s.append(f'<text x="56" y="196" fill="{MUT}" font-size="20">Run code in a 4 ms throw-away sandbox and hand the agent a typed <tspan fill="{TEAL2}">verdict</tspan> —</text>')
     s.append(f'<text x="56" y="223" fill="{MUT}" font-size="20">parsed crashes, diagnostics, failing tests, and a <tspan fill="{TEAL2}">delta</tspan> vs the last run — not 30 KB of stdout.</text>')
 

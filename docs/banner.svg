@@ -6,7 +6,7 @@
 </g>
 <text x="56" y="66" fill="#2bc4b2" font-size="15" font-weight="600" letter-spacing="4">RUST · HERMETIC SANDBOX · TYPED AGENT FEEDBACK</text>
 <text x="52" y="150" fill="#eaf3f2" font-size="86" font-weight="800" letter-spacing="-2">sbx</text>
-<text x="180" y="150" fill="#9fb4ba" font-size="26" font-weight="600">a hermetic executor for coding agents</text>
+<text x="232" y="150" fill="#9fb4ba" font-size="26" font-weight="600">a hermetic executor for coding agents</text>
 <text x="56" y="196" fill="#9fb4ba" font-size="20">Run code in a 4 ms throw-away sandbox and hand the agent a typed <tspan fill="#63e0cf">verdict</tspan> —</text>
 <text x="56" y="223" fill="#9fb4ba" font-size="20">parsed crashes, diagnostics, failing tests, and a <tspan fill="#63e0cf">delta</tspan> vs the last run — not 30 KB of stdout.</text>
 <rect x="56" y="250" width="470" height="96" rx="8" fill="#16262a" stroke="#24363b"/>
