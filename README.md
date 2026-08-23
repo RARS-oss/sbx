@@ -157,6 +157,7 @@ cargo run -p sbx-cli -- bench --n 30      # startup latency
 cargo run -p sbx-cli -- run --work /tmp/x -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
 cargo run -p sbx-cli -- run --work /tmp/x --json -- pytest -q     # full outcome + verdict + delta
 cargo run -p sbx-cli -- run --work /tmp/w --overlay /path/to/repo -- go test ./...  # big repo, not copied
+cargo run -p sbx-cli -- run --work /tmp/x --repeat 10 -- pytest -q     # flaky? 10 runs, flag nondeterminism
 ```
 
 Requirements: Linux with unprivileged user namespaces (default on Ubuntu / Fedora / WSL2). On WSL2, cgroup
@@ -207,8 +208,10 @@ Ordered by value × tractability. Items marked † were independently recommende
   agnostic version (Linux-only, high effort).
 
 **Research-grade / later.**
-- **Parallel-run race detection.** Flagging nondeterminism under parallel tests is useful but cuts against the
-  determinism thesis and is a genuine research problem (rr / Hermit territory) — deliberately last.
+- **Race / nondeterminism detection — shipped** as `sbx run --repeat N`: runs N times and compares the
+  *semantic* verdict (status, crash identity, failing tests, diagnostics — not wall time), flagging a flaky
+  test or a race as "K distinct verdicts across N runs". It detects *presence*, not absence — the honest,
+  determinism-consistent form; full record/replay stays rr/Hermit territory.
 
 ---
 

@@ -62,6 +62,11 @@ enum Cmd {
         /// on a Linux filesystem that supports overlayfs (not a /mnt/c drvfs mount).
         #[arg(long)]
         overlay: Option<PathBuf>,
+        /// Run the command this many times and report whether the verdict is identical across all
+        /// runs — flags flaky tests / races / nondeterminism. Prints a determinism summary and
+        /// exits without writing delta state.
+        #[arg(long, default_value_t = 1)]
+        repeat: u32,
         /// Extra environment variable KEY=VALUE layered over the hermetic profile (PATH may be
         /// extended this way for toolchains bound with --ro). Repeatable.
         #[arg(long = "env")]
@@ -121,6 +126,7 @@ fn main() -> Result<()> {
             ro,
             rw,
             overlay,
+            repeat,
             env,
             json,
             raw,
@@ -149,6 +155,37 @@ fn main() -> Result<()> {
                 if let Some((k, v)) = kv.split_once('=') {
                     spec.env.insert(k.to_string(), v.to_string());
                 }
+            }
+            if repeat > 1 {
+                // Determinism / race check: run N times, group by the SEMANTIC verdict (status,
+                // crash identity, failing tests, diagnostics) — not wall time, which always varies.
+                use std::collections::BTreeMap;
+                let mut groups: BTreeMap<String, (Vec<u32>, String)> = BTreeMap::new();
+                for i in 1..=repeat {
+                    let outcome = hermit_core::run(&spec)?;
+                    let facts = facts_of(&outcome);
+                    let mut v = feedback::distill(&outcome.stdout, &outcome.stderr, &facts);
+                    feedback::enrich_scopes(&mut v, &work);
+                    let show = feedback::render(&v, None, &RenderOpts::default())
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    groups.entry(det_key(&v)).or_insert((vec![], show)).0.push(i);
+                }
+                if groups.len() == 1 {
+                    println!("[sbx] DETERMINISM: {repeat}/{repeat} runs identical (deterministic)");
+                } else {
+                    println!(
+                        "[sbx] DETERMINISM: {} distinct verdicts across {repeat} runs — NONDETERMINISTIC (flaky test or a race)",
+                        groups.len()
+                    );
+                    for (runs, show) in groups.values() {
+                        println!("  runs {runs:?}: {show}");
+                    }
+                }
+                return Ok(());
             }
             let outcome = hermit_core::run(&spec)?;
             let facts = facts_of(&outcome);
@@ -270,6 +307,33 @@ fn main() -> Result<()> {
         Cmd::Selftest => selftest(),
         Cmd::Bench { n } => bench(n),
     }
+}
+
+/// A canonical, timing-free key for the semantic result of a run — used by `--repeat` to tell a
+/// genuine nondeterminism (a flaky test, a race, a leaked address) from mere wall-clock jitter.
+fn det_key(v: &Verdict) -> String {
+    let mut s = format!("{:?}|exit={:?}|sig={:?}", v.status, v.exit_code, v.signal);
+    if let Some(c) = &v.crash {
+        let loc = c
+            .first_user_frame
+            .as_ref()
+            .map(|f| format!("{:?}:{:?}", f.file, f.line))
+            .unwrap_or_default();
+        s.push_str(&format!("|crash={}@{loc}", c.kind));
+    }
+    if let Some(t) = &v.tests {
+        let mut names: Vec<&str> = t.failures.iter().map(|f| f.name.as_str()).collect();
+        names.sort_unstable();
+        s.push_str(&format!("|tests={}/{}/{}:{names:?}", t.passed, t.failed, t.errors));
+    }
+    let mut diags: Vec<String> = v
+        .diagnostics
+        .iter()
+        .map(|d| format!("{}:{:?}:{}", d.tool, d.code, d.message))
+        .collect();
+    diags.sort_unstable();
+    s.push_str(&format!("|diags={diags:?}"));
+    s
 }
 
 fn facts_of(o: &hermit_core::Outcome) -> RunFacts {
