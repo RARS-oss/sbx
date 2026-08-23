@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Typed, delta-aware machine feedback for coding agents: parses compiler diagnostics, sanitizer/crash reports and test results into a Verdict, diffs consecutive Verdicts, renders a compact agent-facing summary"
+repository.workspace = true
+keywords = ["diagnostics", "parser", "testing", "agent", "delta"]
+categories = ["development-tools::testing", "parser-implementations"]
+readme = "README.md"
 
 [dependencies]
 serde.workspace = true

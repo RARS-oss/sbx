@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Hermetic Linux sandbox: user/pid/mount/net/uts/ipc namespaces, pivot_root, rlimits, best-effort cgroup v2, deterministic environment profile"
+repository.workspace = true
+keywords = ["sandbox", "namespaces", "seccomp", "linux", "isolation"]
+categories = ["os::linux-apis", "development-tools"]
+readme = "README.md"
 
 [dependencies]
 anyhow.workspace = true

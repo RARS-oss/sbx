@@ -148,6 +148,33 @@ sandbox-executor/
 └── research/          # prior-art survey, round-2 synthesis, the literature behind every claim
 ```
 
+## Install
+
+Three ways to get `sbx`, no repo clone required. **Linux only** — the sandbox is built from
+user namespaces + seccomp + `pivot_root`; on macOS / Windows run it inside a Linux VM / WSL2
+(see [`adapters/lima/`](adapters/lima/)).
+
+```bash
+# 1. Pre-built binary from a tagged GitHub Release
+curl -L https://github.com/RARS-oss/sbx/releases/latest/download/sbx-v0.1.0-x86_64-unknown-linux-gnu.tar.gz \
+  | tar xz && ./sbx selftest
+
+# 2. From crates.io (installs the `sbx` binary)
+cargo install sbx-cli
+
+# 3. Docker / OCI — the image ships with the toolchains sbx sandboxes (gcc, clang, python3)
+docker run --security-opt seccomp=unconfined ghcr.io/rars-oss/sbx \
+  run -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
+```
+
+`--security-opt seccomp=unconfined` lets sbx create its own namespaces (Docker's default profile
+blocks the `clone`/`unshare` flags); sbx then installs its *own* seccomp filter inside. The Release
+binary and the GHCR image are both produced by
+[`.github/workflows/release.yml`](.github/workflows/release.yml) on a `v*` tag, and the three crates
+carry crates.io metadata (`hermit-core` and `feedback` pass `cargo publish --dry-run`). These three
+paths go live the moment the first `v0.1.0` tag is pushed and the crates are published — the
+plumbing is wired and verified; see [`docs/RELEASING.md`](docs/RELEASING.md).
+
 ## Build &amp; test
 
 ```bash
@@ -200,6 +227,14 @@ Ordered by value × tractability. Items marked † were independently recommende
   the CLI (macOS Virtualization.framework via Lima; Windows already runs through WSL) so `sbx` behaves the same
   everywhere. Native namespaces don't exist off Linux, so this is "ship a fast persistent VM"; the Lima config
   + wrapper are authored to mirror the tested WSL path (not yet exercised on macOS in CI).
+
+- **Install without compiling — shipped.** A `v*` tag builds a stripped Linux binary (GitHub
+  Releases) and a slim multi-stage **OCI image** to GHCR, both via
+  [`.github/workflows/release.yml`](.github/workflows/release.yml). All three crates carry
+  crates.io metadata; `hermit-core` and `feedback` pass `cargo publish --dry-run` (sbx-cli verifies
+  after they're on the index — standard publish ordering). So `cargo install sbx-cli`,
+  `docker run ghcr.io/rars-oss/sbx`, and a `curl`-able tarball all light up on first release — see
+  [Install](#install) and [`docs/RELEASING.md`](docs/RELEASING.md).
 
 **Sharper feedback.**
 - **Tree-sitter semantic deltas — shipped for C, C++, Rust, Python, Go** (`feedback/src/scope.rs`). † Each

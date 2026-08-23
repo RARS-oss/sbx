@@ -10,12 +10,13 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/RARS-oss/sandbox-executor"
+repository = "https://github.com/RARS-oss/sbx"
 description = "sbx: a hermetic Linux sandbox executor that returns typed, delta-aware machine feedback to LLM coding agents instead of raw stdout"
 
 [workspace.dependencies]
-hermit-core = { path = "crates/hermit-core" }
-feedback = { path = "crates/feedback" }
+# path + version so the crates are publishable to crates.io (path used locally, version on release).
+hermit-core = { path = "crates/hermit-core", version = "0.1.0" }
+feedback = { path = "crates/feedback", version = "0.1.0" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

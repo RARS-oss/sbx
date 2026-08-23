@@ -1,0 +1,6 @@
+target
+**/target
+.git
+bench/out
+docs/report.html
+*.log

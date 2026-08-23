@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "sbx — run a command hermetically and get a typed verdict (+ delta vs. last run) instead of raw output"
+repository.workspace = true
+keywords = ["sandbox", "seccomp", "agent", "llm", "testing"]
+categories = ["command-line-utilities", "development-tools::testing"]
+readme = "README.md"
 
 [[bin]]
 name = "sbx"
