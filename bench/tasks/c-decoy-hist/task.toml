@@ -1,0 +1,13 @@
+name = "c-decoy-hist"
+lang = "c"
+family = "memory-safety"
+bug = "heap-buffer-overflow whose CRASH SITE (tally) is not the FIX SITE (capacity off-by-one)"
+prompt = """
+`hist.c` builds a histogram of small integer samples and prints how many equal 5. `sh test.sh`
+compiles it with AddressSanitizer and checks the output is exactly `fives=3`. It currently crashes.
+Fix the bug in `hist.c` so the test passes; do not modify `test.sh` or the expected output.
+"""
+run = "sh test.sh"
+files = ["hist.c"]
+protected = ["test.sh"]
+timeout = 120
