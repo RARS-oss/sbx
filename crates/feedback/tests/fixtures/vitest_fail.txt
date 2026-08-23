@@ -1,0 +1,14 @@
+ ❯ src/sum.test.ts (3)
+   ✓ adds
+   × subtracts
+   ✓ multiplies
+
+ FAIL  src/sum.test.ts > subtracts
+AssertionError: expected 1 to be 2 // Object.is equality
+
+ ❯ src/sum.test.ts:11:22
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  12:00:00
+   Duration  240ms

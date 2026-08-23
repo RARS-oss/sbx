@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2021-000?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/tests-17%20passing-2f8f5b" alt="tests">
+  <img src="https://img.shields.io/badge/tests-20%20passing-2f8f5b" alt="tests">
   <img src="https://img.shields.io/badge/clippy%20%2B%20fmt-clean-2f8f5b" alt="lint">
   <img src="https://img.shields.io/badge/startup-4.6%20ms-2bc4b2" alt="startup 4.6 ms">
   <img src="https://img.shields.io/badge/no%20root-unprivileged-2bc4b2" alt="no root">
@@ -65,7 +65,7 @@ in the loop, no lossy summarisation.**
 | Crate | Role |
 |---|---|
 | **`hermit-core`** | The mechanism. `clone(2)` into fresh **user / pid / mount / net / uts / ipc / cgroup** namespaces, tmpfs root with read-only host binds, `pivot_root`, seccomp-bpf denylist, loopback up via raw netlink, rlimits, best-effort cgroup v2, `no_new_privs`, `ADDR_NO_RANDOMIZE`, fixed environment. No root, no daemon. Every `Outcome` carries an `Applied` record saying exactly which isolation held. |
-| **`feedback`** | The policy. `distill(stdout, stderr, facts) -> Verdict` (sanitizers → `Crash`, gcc/clang/rustc → `Diagnostic`s, pytest/cargo-test/ctest/gtest → `Tests`, tracebacks, signals), `diff(prev, cur) -> Delta` with line-shift-tolerant matching, and a stable text `render`. Pure functions, fixture-tested. |
+| **`feedback`** | The policy. `distill(stdout, stderr, facts) -> Verdict` (sanitizers → `Crash`, gcc/clang/rustc → `Diagnostic`s, pytest/cargo-test/ctest/gtest/go-test/jest/vitest → `Tests`, tracebacks, signals), `diff(prev, cur) -> Delta` with line-shift-tolerant matching, and a stable text `render`. Pure functions, fixture-tested. |
 | **`sbx-cli`** | `sbx run \| verdict \| selftest \| bench`. `run` persists the last verdict under `<work>/.sbx/` so the next run prints a delta automatically; `--json` gives the full machine-readable outcome. |
 
 ## The main result: same fix, far less context
@@ -128,7 +128,7 @@ hostile-multi-tenant jail; the full threat-model note is in [`docs/REPORT.md` §
 | **seccomp-bpf syscall filtering** | `crates/hermit-core/src/seccomp.rs` — EPERM denylist: `io_uring`, `bpf`, `ptrace`, `mount`, `AF_ALG`, ~40 families |
 | **Netlink by hand** | `netlink.rs` — brings loopback `UP` inside the net namespace with no `ip` binary |
 | **Deterministic execution** | fixed env, no ASLR, frozen clock/seed — the precondition for run-to-run deltas |
-| **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, tracebacks, signals |
+| **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, **go test, Jest/Vitest**, tracebacks, signals |
 | **Differential feedback** | `feedback/src/delta.rs` — line-shift-tolerant diff of two runs (crash moved / SAME, tests fixed / broken) |
 | **Causal experiment design** | `bench/` — byte-identical execution, single-field verdict corruption, first-edit-locus readout, matched controls |
 | **Three-tier agent harness** | `bench/agent/agent.py` — Anthropic SDK · Ollama · Claude Code CLI backends, cache-aware cost accounting |
@@ -151,7 +151,7 @@ sandbox-executor/
 ## Build &amp; test
 
 ```bash
-cargo test --workspace                    # 17 tests
+cargo test --workspace                    # 20 tests
 cargo run -p sbx-cli -- selftest          # prints what isolation held on this kernel
 cargo run -p sbx-cli -- bench --n 30      # startup latency
 cargo run -p sbx-cli -- run --work /tmp/x -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
@@ -187,8 +187,9 @@ Ordered by value × tractability. Items marked † were independently recommende
 - **A native MCP server.** † Expose the Verdict as MCP `structuredContent` behind a versioned `sbx.run-result`
   schema, so Cursor / Windsurf / Claude Desktop / Roo Code attach the tool with one config line — no custom
   hook. Highest adoption lever.
-- **More language parsers.** Node/TS (Jest, Vitest), Go (`go test`), richer Python tracebacks (+`rich`),
-  Java/Kotlin. The parsers are the product surface; each is a self-contained addition to `feedback/parse.rs`.
+- **More language parsers.** Go (`go test`) and Node/TS (Jest, Vitest) shipped; next: Java/Kotlin (JUnit),
+  richer Python tracebacks (+`rich`). The parsers are the product surface — each is a self-contained addition to
+  `feedback/parse.rs` with a fixture test.
 - **Cross-platform via Lima / WSL.** A persistent Linux micro-VM behind the CLI (macOS
   `Virtualization.framework` / Lima; the Windows path already runs through WSL) so `sbx` behaves the same
   everywhere. (Native Linux namespaces don't exist on macOS/Windows — this is "ship a fast Linux VM," and the

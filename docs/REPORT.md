@@ -97,7 +97,7 @@ from the evaluation side.
 
 **Contributions.** (1) `sbx`: a ~4 k-line Rust executor, no root, documented hermetic profile,
 self-describing outcomes, 4.6 ms per run. (2) The Verdict/Delta contract and deterministic parsers
-for ASan/UBSan/LSan/TSan, gcc/clang, rustc, pytest/unittest/cargo test/ctest/gtest/shell check
+for ASan/UBSan/LSan/TSan, gcc/clang, rustc, pytest/unittest/cargo test/ctest/gtest/go test/Jest/Vitest/shell check
 scripts, Python tracebacks and fatal signals. (3) Two controlled micro-experiments (startup latency;
 run-to-run determinism) and a feedback-form experiment with identical execution and six
 presentations, on 12 validated C/C++/Rust/Python tasks, with success, turns, tokens and cost per

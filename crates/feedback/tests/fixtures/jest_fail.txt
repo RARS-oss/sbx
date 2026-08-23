@@ -1,0 +1,15 @@
+ FAIL  src/sum.test.js
+  ● sum › adds two numbers
+
+    expect(received).toBe(expected)
+
+    Expected: 5
+    Received: 4
+
+      at Object.<anonymous> (src/sum.test.js:7:19)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 2 passed, 3 total
+Snapshots:   0 total
+Time:        1.2 s
+Ran all test suites.

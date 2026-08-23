@@ -129,6 +129,20 @@ static RE_CTEST_FAIL: Lazy<Regex> = Lazy::new(|| {
 static RE_CTEST_SUMMARY: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(\d+)% tests passed, (\d+) tests failed out of (\d+)$").unwrap());
 
+// go test: `--- FAIL: TestName (0.00s)` / `--- PASS:` / `--- SKIP:`; the `t.Errorf` location
+// (`    file_test.go:LINE: message`) prints *before* the summary line, so we buffer it per test.
+static RE_GO_RESULT: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*--- (FAIL|PASS|SKIP): (\S+)").unwrap());
+static RE_GO_LOC: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\s+([\w./@-]+_test\.go):(\d+): (.*)").unwrap());
+// Jest: `Tests:       1 failed, 2 passed, 3 total`. Vitest: `Tests  1 failed | 2 passed (3)`.
+static RE_JEST_SUMMARY: Lazy<Regex> = Lazy::new(|| Regex::new(r"^Tests:\s+(.+)$").unwrap());
+static RE_VITEST_SUMMARY: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\s*Tests\s+([0-9].+?)\s*\((\d+)\)\s*$").unwrap());
+// a failing test line in either (● jest, × / ✕ / ✗ vitest); ✓ (pass) is deliberately excluded.
+static RE_JS_FAILNAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(?:●|✕|✗|×)\s+(.+\S)\s*$").unwrap());
+static RE_JS_LOC: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"([\w./@-]+\.(?:test|spec)\.[cm]?[jt]sx?):(\d+):\d+").unwrap());
+
 fn is_user_path(p: &str) -> bool {
     !(p.starts_with("../sysdeps")
         || p.contains("/libc")
@@ -739,6 +753,126 @@ fn parse_check_script(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<T
     }
 }
 
+/// `go test` (optionally `-v`). Counts `--- PASS/FAIL/SKIP`; a `t.Errorf` location that printed
+/// before the `--- FAIL` line is buffered and attached to that failure.
+fn parse_gotest(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Tests> {
+    let mut t = Tests {
+        runner: "go-test".into(),
+        ..Default::default()
+    };
+    let mut seen = false;
+    let mut pending: Vec<(usize, String, u32, String)> = vec![]; // loc lines since last `=== RUN`
+    for (i, raw) in lines.iter().enumerate() {
+        let l = raw.trim_end();
+        if l.trim_start().starts_with("=== RUN") {
+            pending.clear();
+            continue;
+        }
+        if let Some(c) = RE_GO_LOC.captures(l) {
+            pending.push((
+                i,
+                c[1].to_string(),
+                c[2].parse().unwrap_or(0),
+                c[3].trim().to_string(),
+            ));
+        } else if let Some(c) = RE_GO_RESULT.captures(l) {
+            seen = true;
+            claimed.insert(i);
+            match &c[1] {
+                "PASS" => t.passed += 1,
+                "SKIP" => t.skipped += 1,
+                "FAIL" => {
+                    t.failed += 1;
+                    let (file, line, message) = match pending.first() {
+                        Some((_, f, ln, m)) => (Some(f.clone()), Some(*ln), Some(m.clone())),
+                        None => (None, None, None),
+                    };
+                    for (pi, _, _, _) in &pending {
+                        claimed.insert(*pi);
+                    }
+                    t.failures.push(TestFailure {
+                        name: c[2].to_string(),
+                        file,
+                        line,
+                        message,
+                    });
+                }
+                _ => {}
+            }
+            pending.clear();
+        }
+    }
+    if seen {
+        Some(t)
+    } else {
+        None
+    }
+}
+
+/// Jest (`Tests:  N failed, M passed, T total`) and Vitest (`Tests  N failed | M passed (T)`).
+fn parse_jslike(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Tests> {
+    let mut t = Tests::default();
+    let mut runner = "";
+    for (i, raw) in lines.iter().enumerate() {
+        let l = raw.trim_end();
+        if let Some(c) = RE_JEST_SUMMARY.captures(l) {
+            runner = "jest";
+            for part in c[1].split(',') {
+                let mut it = part.split_whitespace();
+                let n: u32 = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                match it.next().unwrap_or("") {
+                    "failed" => t.failed = n,
+                    "passed" => t.passed = n,
+                    "skipped" | "todo" => t.skipped += n,
+                    _ => {}
+                }
+            }
+            claimed.insert(i);
+        } else if runner.is_empty() {
+            if let Some(c) = RE_VITEST_SUMMARY.captures(l) {
+                runner = "vitest";
+                for part in c[1].split('|') {
+                    let mut it = part.split_whitespace();
+                    let n: u32 = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                    match it.next().unwrap_or("") {
+                        "failed" => t.failed = n,
+                        "passed" => t.passed = n,
+                        "skipped" => t.skipped += n,
+                        _ => {}
+                    }
+                }
+                claimed.insert(i);
+            }
+        }
+    }
+    if runner.is_empty() {
+        return None;
+    }
+    t.runner = runner.into();
+    // Collect failing test names (● / × / ✕ / ✗) and attach the nearest test-file location.
+    for (i, raw) in lines.iter().enumerate() {
+        if let Some(c) = RE_JS_FAILNAME.captures(raw.trim_end()) {
+            let name = c[1].trim().to_string();
+            let (mut file, mut line) = (None, None);
+            for lj in lines.iter().take((i + 20).min(lines.len())).skip(i) {
+                if let Some(lc) = RE_JS_LOC.captures(lj) {
+                    file = Some(lc[1].to_string());
+                    line = lc[2].parse().ok();
+                    break;
+                }
+            }
+            t.failures.push(TestFailure {
+                name,
+                file,
+                line,
+                message: None,
+            });
+            claimed.insert(i);
+        }
+    }
+    Some(t)
+}
+
 fn parse_tests(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Tests> {
     if let Some(t) = parse_unittest(lines, claimed) {
         return Some(t);
@@ -894,6 +1028,12 @@ fn parse_tests(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Tests> {
             gt.failed = gt.failures.len() as u32;
         }
         return Some(gt);
+    }
+    if let Some(t) = parse_gotest(lines, claimed) {
+        return Some(t);
+    }
+    if let Some(t) = parse_jslike(lines, claimed) {
+        return Some(t);
     }
     parse_check_script(lines, claimed)
 }
