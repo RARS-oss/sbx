@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2021-000?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/tests-23%20passing-2f8f5b" alt="tests">
+  <img src="https://img.shields.io/badge/tests-24%20passing-2f8f5b" alt="tests">
   <img src="https://img.shields.io/badge/clippy%20%2B%20fmt-clean-2f8f5b" alt="lint">
   <img src="https://img.shields.io/badge/startup-4.6%20ms-2bc4b2" alt="startup 4.6 ms">
   <img src="https://img.shields.io/badge/no%20root-unprivileged-2bc4b2" alt="no root">
@@ -128,7 +128,7 @@ hostile-multi-tenant jail; the full threat-model note is in [`docs/REPORT.md` §
 | **seccomp-bpf syscall filtering** | `crates/hermit-core/src/seccomp.rs` — EPERM denylist: `io_uring`, `bpf`, `ptrace`, `mount`, `AF_ALG`, ~40 families |
 | **Netlink by hand** | `netlink.rs` — brings loopback `UP` inside the net namespace with no `ip` binary |
 | **Deterministic execution** | fixed env, no ASLR, frozen clock/seed — the precondition for run-to-run deltas |
-| **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, **go test, Jest/Vitest**, tracebacks, signals |
+| **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, **go test, Jest/Vitest**, tracebacks, signals + AST scopes (C/C++/Rust/Python/Go) |
 | **Differential feedback** | `feedback/src/delta.rs` — diff of two runs (crash moved / SAME, tests fixed / broken), matched **by AST scope** (`feedback/src/scope.rs`, tree-sitter) so a diagnostic survives a refactor, else line-shift-tolerant |
 | **Causal experiment design** | `bench/` — byte-identical execution, single-field verdict corruption, first-edit-locus readout, matched controls |
 | **Three-tier agent harness** | `bench/agent/agent.py` — Anthropic SDK · Ollama · Claude Code CLI backends, `list_files`/`read_file`/`write_file`/`run` tools, cache-aware cost |
@@ -151,7 +151,7 @@ sandbox-executor/
 ## Build &amp; test
 
 ```bash
-cargo test --workspace                    # 23 tests
+cargo test --workspace                    # 24 tests
 cargo run -p sbx-cli -- selftest          # prints what isolation held on this kernel
 cargo run -p sbx-cli -- bench --n 30      # startup latency
 cargo run -p sbx-cli -- run --work /tmp/x -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
@@ -201,9 +201,10 @@ Ordered by value × tractability. Items marked † were independently recommende
   + wrapper are authored to mirror the tested WSL path (not yet exercised on macOS in CI).
 
 **Sharper feedback.**
-- **Tree-sitter semantic deltas — shipped for C** (`feedback/src/scope.rs`). † Each diagnostic is AST-enriched
-  with its enclosing function; the delta matches by *scope* so a diagnostic survives a refactor that moves its
-  line far (a ±3-line window would call it "1 fixed + 1 new"). Next: extend the grammar set to C++/Rust/Python/Go.
+- **Tree-sitter semantic deltas — shipped for C, C++, Rust, Python, Go** (`feedback/src/scope.rs`). † Each
+  diagnostic is AST-enriched with its enclosing function; the delta matches by *scope* so a diagnostic (or a
+  whole stack frame) survives a refactor that moves its line far — a ±3-line window would call it "1 fixed +
+  1 new".
 - **Print the offending value — shipped (deterministic path).** † The crash verdict now carries the sanitizer's
   access geometry as `offset: N bytes after an M-byte region` — the offending value for a bounds bug (how far
   out, how big the buffer), address-stripped so it stays stable, no debugger or eBPF. Dynamic tracing of
