@@ -159,7 +159,14 @@ def convert(md: str, figs: Path, base: Path) -> str:
             flush_para(); flush_list()
             alt, src = m.group(1), m.group(2)
             p = base / src
-            if p.exists():
+            # containment: only inline SVGs that live under the markdown's own dir
+            # (a crafted absolute / ../ reference must never read files outside the repo).
+            try:
+                p.resolve().relative_to(base.resolve())
+                contained = True
+            except ValueError:
+                contained = False
+            if contained and p.exists():
                 svg = p.read_text(encoding="utf-8")
                 svg = re.sub(r"<\?xml[^>]*\?>", "", svg)
                 svg = re.sub(r"<!DOCTYPE[^>]*>", "", svg)

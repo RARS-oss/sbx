@@ -559,9 +559,11 @@ across four C/C++ memory-safety bugs, comparing `raw` stdout against the typed V
 **Same fix, far less context.** Across seven clean pairs — identical success, identical fix locus —
 the typed arm showed the model **2.3–17.7× fewer characters** (median **2.8×**), and the reduction
 scales with output size: on the 18 KB use-after-free and 36 KB vector-overflow crashes it reaches
-9–18×. On Haiku the same episode cost **8× less** ($0.53 → $0.068). This is a context-efficiency
-result, not a capability one — both models solve every task under every condition — but it is real
-token / cost / latency saved for the same outcome, and it compounds across long agent sessions.
+9–18×. On a single illustrative Haiku episode (`c-grow-oob`, n = 1;
+[`bench/results/frontier-haiku-grow.jsonl`](../bench/results/frontier-haiku-grow.jsonl)) the same
+fix cost **8× less** ($0.53 → $0.068). This is a context-efficiency result, not a capability one —
+both models fix these bugs from source — but it is real token / cost / latency saved for the same
+outcome, and it compounds across long agent sessions.
 
 ![Same fix, far less context — on frontier models](frontier-efficiency.svg)
 

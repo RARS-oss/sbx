@@ -33,8 +33,9 @@ reduction scales with output size — on the 18 KB use-after-free and 36 KB vect
 Cost of the run: Sonnet **$3.38**, Opus **$12.60** (16 episodes).
 
 ## Honest interpretation
-- This is a **context-efficiency** result, not a capability one. Both frontier models solve these tasks
-  under every condition (same success, comparable turns). On small, readable bugs a strong model fixes
+- This is a **context-efficiency** result, not a capability one. Both frontier models fix these bugs
+  from source (same success on the 7 clean pairs, comparable turns; the one incomplete cell was an
+  infra flake, below). On small, readable bugs a strong model fixes
   from source and does not loop — so the feedback *content* (delta, anti-loop) is not load-bearing here.
   What the typed *presentation* still buys is **2–18× less context for the same outcome** — real
   token / cost / latency savings that compound across long agent sessions.
