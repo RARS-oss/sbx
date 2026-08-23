@@ -142,7 +142,7 @@ sandbox-executor/
 │   ├── hermit-core/   # lib.rs (Spec/Outcome/run), child.rs (ns + mounts + exec), cgroup.rs, seccomp.rs, netlink.rs
 │   ├── feedback/      # lib.rs (Verdict types), parse.rs, delta.rs, render.rs, tests/fixtures/
 │   └── sbx-cli/       # the sbx binary
-├── adapters/claude-code/  # PostToolUse hook + settings example
+├── adapters/          # claude-code/ (PostToolUse hook) · mcp/ (MCP server for any client)
 ├── bench/             # experiment harness: agent/, tasks/ (14 validated), scripts/ (steer_run, steer_analyze, plot)
 ├── docs/              # REPORT.md + report.html (the write-up), verdict-schema.md, hermetic-profile.md, figures
 └── research/          # prior-art survey, round-2 synthesis, the literature behind every claim
@@ -184,9 +184,9 @@ Ordered by value × tractability. Items marked † were independently recommende
   COW snapshot/fork of the work dir †.
 
 **Make it adoptable.**
-- **A native MCP server.** † Expose the Verdict as MCP `structuredContent` behind a versioned `sbx.run-result`
-  schema, so Cursor / Windsurf / Claude Desktop / Roo Code attach the tool with one config line — no custom
-  hook. Highest adoption lever.
+- **MCP server — shipped** (`adapters/mcp/`). † Claude Desktop / Cursor / Windsurf / Roo Code attach sbx with
+  one config block (`run` + `verdict` tools, no custom hook). Next: emit the Verdict as MCP `structuredContent`
+  behind a versioned `sbx.run-result` `outputSchema`.
 - **More language parsers.** Go (`go test`) and Node/TS (Jest, Vitest) shipped; next: Java/Kotlin (JUnit),
   richer Python tracebacks (+`rich`). The parsers are the product surface — each is a self-contained addition to
   `feedback/parse.rs` with a fixture test.
