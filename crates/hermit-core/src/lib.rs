@@ -137,6 +137,11 @@ pub struct Spec {
     pub hermetic: Hermetic,
     /// Bytes written to the child's stdin (then EOF). Empty = /dev/null-like.
     pub stdin: Vec<u8>,
+    /// If set, mount `/work` as an overlay of this read-only lower dir (e.g. a large repo, mounted
+    /// without copying) with `work_dir` as the writable upper — the agent's edits land in
+    /// `work_dir/upper`, the lower is never touched. `work_dir` must be on a Linux filesystem that
+    /// supports overlayfs (not a `/mnt/c` drvfs mount).
+    pub overlay_lower: Option<PathBuf>,
 }
 
 impl Spec {
@@ -151,6 +156,7 @@ impl Spec {
             limits: Limits::default(),
             hermetic: Hermetic::default(),
             stdin: vec![],
+            overlay_lower: None,
         }
     }
 }

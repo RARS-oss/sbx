@@ -156,6 +156,7 @@ cargo run -p sbx-cli -- selftest          # prints what isolation held on this k
 cargo run -p sbx-cli -- bench --n 30      # startup latency
 cargo run -p sbx-cli -- run --work /tmp/x -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
 cargo run -p sbx-cli -- run --work /tmp/x --json -- pytest -q     # full outcome + verdict + delta
+cargo run -p sbx-cli -- run --work /tmp/w --overlay /path/to/repo -- go test ./...  # big repo, not copied
 ```
 
 Requirements: Linux with unprivileged user namespaces (default on Ubuntu / Fedora / WSL2). On WSL2, cgroup
@@ -179,9 +180,9 @@ Ordered by value × tractability. Items marked † were independently recommende
 - **Real benchmarks: SWE-bench · ARVO · SEC-bench.** † The causal study (§6.7) showed the turn/cost win is a
   large-repo / must-iterate phenomenon; the honest way to measure token- and success-gains on multi-file
   repair is to run *there*, not on 14 single-file tasks. **This is #1.**
-- **`overlayfs` instead of `tmpfs`.** A read-only lower (the repo) + a writable upper (the agent's edits) so a
-  large repo isn't copied into RAM every run — a prerequisite for the benchmarks above, and the seam for
-  COW snapshot/fork of the work dir †.
+- **`overlayfs` — shipped** as `sbx run --overlay <repo>`. † The repo is the read-only lower (mounted, not
+  copied); the agent's edits land in `<work>/upper`, the repo untouched. Enables the large-repo benchmarks
+  above, and is the seam for COW snapshot/fork of the work dir.
 
 **Make it adoptable.**
 - **MCP server — shipped** (`adapters/mcp/`). † Claude Desktop / Cursor / Windsurf / Roo Code attach sbx with

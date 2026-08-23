@@ -57,6 +57,11 @@ enum Cmd {
         /// Extra read-write bind (host path, same path inside). Repeatable.
         #[arg(long = "rw")]
         rw: Vec<PathBuf>,
+        /// Mount /work as an overlay of this read-only lower dir (e.g. a large repo, mounted without
+        /// copying); the agent's edits land in <work>/upper, the lower is untouched. <work> must be
+        /// on a Linux filesystem that supports overlayfs (not a /mnt/c drvfs mount).
+        #[arg(long)]
+        overlay: Option<PathBuf>,
         /// Extra environment variable KEY=VALUE layered over the hermetic profile (PATH may be
         /// extended this way for toolchains bound with --ro). Repeatable.
         #[arg(long = "env")]
@@ -115,6 +120,7 @@ fn main() -> Result<()> {
             no_loopback,
             ro,
             rw,
+            overlay,
             env,
             json,
             raw,
@@ -133,6 +139,12 @@ fn main() -> Result<()> {
             spec.hermetic.loopback = !no_loopback;
             spec.ro_binds = ro;
             spec.rw_binds = rw;
+            if let Some(lower) = overlay {
+                spec.overlay_lower = Some(
+                    std::fs::canonicalize(&lower)
+                        .with_context(|| format!("overlay lower {}", lower.display()))?,
+                );
+            }
             for kv in env {
                 if let Some((k, v)) = kv.split_once('=') {
                     spec.env.insert(k.to_string(), v.to_string());

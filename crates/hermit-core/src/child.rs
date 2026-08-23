@@ -129,8 +129,37 @@ fn setup_and_exec(cfg: &ChildCfg) -> anyhow::Result<std::convert::Infallible> {
         }
     }
 
-    // /work (rw), /tmp, /run, /dev, /proc.
-    bind(&spec.work_dir, &root.join("work"), false)?;
+    // /work: either an overlay (read-only lower repo + work_dir as the writable upper, so a large
+    // repo is not copied) or a plain read-write bind of the work dir.
+    std::fs::create_dir_all(root.join("work"))?;
+    if let Some(lower) = &spec.overlay_lower {
+        let upper = spec.work_dir.join("upper");
+        let ovwork = spec.work_dir.join(".ovwork");
+        std::fs::create_dir_all(&upper)?;
+        std::fs::create_dir_all(&ovwork)?;
+        let opts = format!(
+            "lowerdir={},upperdir={},workdir={}",
+            lower.display(),
+            upper.display(),
+            ovwork.display()
+        );
+        mount(
+            Some("overlay"),
+            &root.join("work"),
+            Some("overlay"),
+            MsFlags::empty(),
+            Some(opts.as_str()),
+        )
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "mount overlay /work (lower={}, upper={}): {e} — work_dir must be on a Linux fs that supports overlayfs",
+                lower.display(),
+                upper.display()
+            )
+        })?;
+    } else {
+        bind(&spec.work_dir, &root.join("work"), false)?;
+    }
     std::fs::create_dir_all(root.join("tmp"))?;
     mount(
         Some("tmpfs"),
