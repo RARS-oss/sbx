@@ -203,9 +203,11 @@ Ordered by value × tractability. Items marked † were independently recommende
 - **Tree-sitter semantic deltas — shipped for C** (`feedback/src/scope.rs`). † Each diagnostic is AST-enriched
   with its enclosing function; the delta matches by *scope* so a diagnostic survives a refactor that moves its
   line far (a ±3-line window would call it "1 fixed + 1 new"). Next: extend the grammar set to C++/Rust/Python/Go.
-- **Print the offending value.** † The index that overflowed, the null pointer, expected-vs-got — captured at
-  the fault. Cheapest via light instrumentation first; an **eBPF uprobe** layer is the ambitious, log-format-
-  agnostic version (Linux-only, high effort).
+- **Print the offending value — shipped (deterministic path).** † The crash verdict now carries the sanitizer's
+  access geometry as `offset: N bytes after an M-byte region` — the offending value for a bounds bug (how far
+  out, how big the buffer), address-stripped so it stays stable, no debugger or eBPF. Dynamic tracing of
+  arbitrary call arguments via an **eBPF uprobe** layer is the ambitious version — it needs `CAP_BPF` and runs
+  *outside* the sandbox tracing the target (the seccomp denylist blocks `bpf` *inside* it).
 
 **Research-grade / later.**
 - **Race / nondeterminism detection — shipped** as `sbx run --repeat N`: runs N times and compares the

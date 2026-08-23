@@ -84,6 +84,11 @@ pub struct Crash {
     /// "READ of size 4" etc.
     pub access: Option<String>,
     pub address: Option<String>,
+    /// Access geometry from the sanitizer, address-stripped: e.g. "0 bytes after a 40-byte region".
+    /// The "offending value" for a bounds bug — how far out of bounds, and how big the buffer was —
+    /// captured deterministically (no debugger, no eBPF). Populated for AddressSanitizer overflows.
+    #[serde(default)]
+    pub region: Option<String>,
     pub message: Option<String>,
     pub frames: Vec<Frame>,
     pub alloc_frames: Vec<Frame>,

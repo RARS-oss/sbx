@@ -82,6 +82,10 @@ static RE_ASAN_SECTION: Lazy<Regex> = Lazy::new(|| {
 static RE_SUMMARY: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^SUMMARY: (AddressSanitizer|LeakSanitizer|MemorySanitizer|ThreadSanitizer|UndefinedBehaviorSanitizer): (.+)$").unwrap()
 });
+// "0x… is located 0 bytes after 40-byte region [..)" -> the offending geometry (offset + buffer size).
+static RE_ASAN_REGION: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"is located (\d+) bytes (to the right of|to the left of|after|before|inside(?: of)?) (?:a |the )?(\d+)-byte region").unwrap()
+});
 static RE_HEX_ADDR: Lazy<Regex> = Lazy::new(|| Regex::new(r"0x[0-9a-fA-F]+").unwrap());
 static RE_UBSAN: Lazy<Regex> = Lazy::new(|| {
     // /work/a.c:7:11: runtime error: signed integer overflow: 2147483647 + 1 cannot be represented in type 'int'
@@ -228,6 +232,7 @@ fn parse_sanitizer(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Cras
         kind,
         access: None,
         address,
+        region: None,
         message: None,
         frames: vec![],
         alloc_frames: vec![],
@@ -289,8 +294,16 @@ fn parse_sanitizer(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Cras
             } else {
                 Sec::Other
             };
-            if crash.message.is_none() && l.contains("is located") {
-                crash.message = Some(l.to_string());
+            if l.contains("is located") {
+                if crash.message.is_none() {
+                    crash.message = Some(l.to_string());
+                }
+                if crash.region.is_none() {
+                    if let Some(c) = RE_ASAN_REGION.captures(l) {
+                        crash.region =
+                            Some(format!("{} bytes {} a {}-byte region", &c[1], &c[2], &c[3]));
+                    }
+                }
             }
             claimed.insert(i);
             continue;
@@ -399,6 +412,7 @@ fn parse_ubsan(
                     kind,
                     access: None,
                     address: None,
+                    region: None,
                     message: Some(msg),
                     frames,
                     alloc_frames: vec![],
@@ -1136,6 +1150,7 @@ fn parse_rust_panic(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Cra
             .unwrap_or_else(|| "panic".into()),
         access: None,
         address: None,
+        region: None,
         message,
         frames,
         alloc_frames: vec![],
@@ -1195,6 +1210,7 @@ fn parse_python_exception(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Opti
         kind,
         access: None,
         address: None,
+        region: None,
         message: Some(msg),
         frames,
         alloc_frames: vec![],
@@ -1241,6 +1257,7 @@ pub fn distill(stdout: &[u8], stderr: &[u8], facts: &RunFacts) -> Verdict {
                 kind: sig.clone(),
                 access: None,
                 address: None,
+                region: None,
                 message: None,
                 frames: vec![],
                 alloc_frames: vec![],

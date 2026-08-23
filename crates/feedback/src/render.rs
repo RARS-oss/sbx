@@ -274,6 +274,9 @@ pub fn render(v: &Verdict, delta: Option<&Delta>, o: &RenderOpts) -> String {
         if let Some(h) = hint_for(&c.tool, &c.kind) {
             s.push_str(&format!("  hint: {h}\n"));
         }
+        if let Some(r) = &c.region {
+            s.push_str(&format!("  offset: {r}\n")); // the offending geometry: how far out, buffer size
+        }
         if let Some(f) = &c.first_user_frame {
             s.push_str(&format!(
                 "  at {} in {}\n",
