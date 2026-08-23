@@ -14,11 +14,13 @@
 pub mod delta;
 pub mod parse;
 pub mod render;
+pub mod scope;
 
 use serde::{Deserialize, Serialize};
 
 pub use delta::{diff, Delta};
 pub use render::{render, RenderOpts};
+pub use scope::enrich_scopes;
 
 /// Top-level status, in increasing order of "the program ran further".
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,6 +56,11 @@ pub struct Diagnostic {
     /// e.g. "E0308", "-Wunused-variable", "-fpermissive"
     pub code: Option<String>,
     pub message: String,
+    /// Enclosing function/scope (AST-derived, best-effort) — lets the delta match a diagnostic
+    /// across a refactor even when its line number moves. Populated by [`enrich_scopes`]; `None`
+    /// until then (and `#[serde(default)]` so a verdict written before this field still loads).
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -58,6 +58,12 @@ fn same_diag(a: &Diagnostic, b: &Diagnostic) -> bool {
     if !msg_eq {
         return false;
     }
+    // Semantic (AST) match: an identical enclosing function means the same diagnostic even if its
+    // line moved far — a refactor the ±LINE_SLACK window would miss (calling it "1 fixed, 1 new").
+    // Only trusted when both scopes are known (enrich_scopes ran); otherwise fall back to line-shift.
+    if let (Some(x), Some(y)) = (&a.scope, &b.scope) {
+        return x == y;
+    }
     match (a.line, b.line) {
         (Some(x), Some(y)) => (x as i64 - y as i64).abs() <= LINE_SLACK,
         (None, None) => true,
@@ -175,6 +181,7 @@ mod tests {
             col: Some(1),
             code: None,
             message: msg.into(),
+            scope: None,
         }
     }
 

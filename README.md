@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2021-000?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/tests-20%20passing-2f8f5b" alt="tests">
+  <img src="https://img.shields.io/badge/tests-23%20passing-2f8f5b" alt="tests">
   <img src="https://img.shields.io/badge/clippy%20%2B%20fmt-clean-2f8f5b" alt="lint">
   <img src="https://img.shields.io/badge/startup-4.6%20ms-2bc4b2" alt="startup 4.6 ms">
   <img src="https://img.shields.io/badge/no%20root-unprivileged-2bc4b2" alt="no root">
@@ -129,7 +129,7 @@ hostile-multi-tenant jail; the full threat-model note is in [`docs/REPORT.md` §
 | **Netlink by hand** | `netlink.rs` — brings loopback `UP` inside the net namespace with no `ip` binary |
 | **Deterministic execution** | fixed env, no ASLR, frozen clock/seed — the precondition for run-to-run deltas |
 | **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, **go test, Jest/Vitest**, tracebacks, signals |
-| **Differential feedback** | `feedback/src/delta.rs` — line-shift-tolerant diff of two runs (crash moved / SAME, tests fixed / broken) |
+| **Differential feedback** | `feedback/src/delta.rs` — diff of two runs (crash moved / SAME, tests fixed / broken), matched **by AST scope** (`feedback/src/scope.rs`, tree-sitter) so a diagnostic survives a refactor, else line-shift-tolerant |
 | **Causal experiment design** | `bench/` — byte-identical execution, single-field verdict corruption, first-edit-locus readout, matched controls |
 | **Three-tier agent harness** | `bench/agent/agent.py` — Anthropic SDK · Ollama · Claude Code CLI backends, cache-aware cost accounting |
 | **Property / fuzz testing** | 300 mutated inputs → 0 failures; 17 unit/integration tests; `clippy -D warnings` clean |
@@ -151,7 +151,7 @@ sandbox-executor/
 ## Build &amp; test
 
 ```bash
-cargo test --workspace                    # 20 tests
+cargo test --workspace                    # 23 tests
 cargo run -p sbx-cli -- selftest          # prints what isolation held on this kernel
 cargo run -p sbx-cli -- bench --n 30      # startup latency
 cargo run -p sbx-cli -- run --work /tmp/x -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
@@ -197,10 +197,9 @@ Ordered by value × tractability. Items marked † were independently recommende
   per-run cost stays low because the VM is persistent.)
 
 **Sharper feedback.**
-- **Tree-sitter AST localization + semantic deltas.** † Map a fault to its enclosing function/node, and match
-  diagnostics across runs by *AST node* (GumTree-style) rather than a ±3-line window — so a diagnostic on a
-  moved or renamed function still matches after a refactor. (The crash/compile *location* already comes
-  file:line-accurate from the tool; Tree-sitter's real payoff is the delta and the enclosing-scope context.)
+- **Tree-sitter semantic deltas — shipped for C** (`feedback/src/scope.rs`). † Each diagnostic is AST-enriched
+  with its enclosing function; the delta matches by *scope* so a diagnostic survives a refactor that moves its
+  line far (a ±3-line window would call it "1 fixed + 1 new"). Next: extend the grammar set to C++/Rust/Python/Go.
 - **Print the offending value.** † The index that overflowed, the null pointer, expected-vs-got — captured at
   the fault. Cheapest via light instrumentation first; an **eBPF uprobe** layer is the ambitious, log-format-
   agnostic version (Linux-only, high effort).

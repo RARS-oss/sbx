@@ -11,3 +11,5 @@ serde_json.workspace = true
 regex.workspace = true
 once_cell.workspace = true
 thiserror.workspace = true
+tree-sitter = "0.22"
+tree-sitter-c = "0.21"

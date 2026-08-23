@@ -350,6 +350,7 @@ fn parse_ubsan(
                 col: Some(col),
                 code: Some("runtime-error".into()),
                 message: msg.clone(),
+                scope: None,
             });
             // UBSAN_OPTIONS=print_stacktrace=1 prints frames after the line — sometimes after a
             // "0x…: note: pointer points here" block with a hex dump and a caret line.
@@ -458,6 +459,7 @@ fn parse_compiler(lines: &[&str], claimed: &mut BTreeSet<usize>, diags: &mut Vec
                 col: c.get(3).and_then(|m| m.as_str().parse().ok()),
                 code: c.get(6).map(|m| m.as_str().to_string()),
                 message: c.get(5).unwrap().as_str().trim().to_string(),
+                scope: None,
             });
             claimed.insert(i);
             continue;
@@ -487,6 +489,7 @@ fn parse_compiler(lines: &[&str], claimed: &mut BTreeSet<usize>, diags: &mut Vec
                 col: None,
                 code: c.get(2).map(|m| m.as_str().to_string()),
                 message: msg.to_string(),
+                scope: None,
             };
             if let Some((_, prev)) = pending_rust.take() {
                 diags.push(prev);

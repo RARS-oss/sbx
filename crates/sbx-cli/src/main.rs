@@ -152,7 +152,10 @@ fn main() -> Result<()> {
             }
             let outcome = hermit_core::run(&spec)?;
             let facts = facts_of(&outcome);
-            let verdict = feedback::distill(&outcome.stdout, &outcome.stderr, &facts);
+            let mut verdict = feedback::distill(&outcome.stdout, &outcome.stderr, &facts);
+            // AST-enrich each diagnostic with its enclosing function (from the sources in <work>),
+            // so the delta can match it across a refactor by scope, not just line number.
+            feedback::enrich_scopes(&mut verdict, &work);
 
             let state_dir = work.join(".sbx");
             let prev: Option<Verdict> = if no_delta {
