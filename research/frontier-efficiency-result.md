@@ -46,4 +46,33 @@ Cost of the run: Sonnet **$3.38**, Opus **$12.60** (16 episodes).
   pipeline/sbx bug: the CLI model called `list_files` twice, produced prose, never read/edited/ran, and
   exhausted its nudges. Opus covers that task at 17.7×.
 
+## The anti-loop boundary — capable models don't loop on synthetic tasks
+
+The run-memory `loop:` signal only helps if the agent actually loops (repeats a fix that leaves the
+verdict unchanged). To test whether it helps a capable model, we built three tasks *engineered* to
+induce a loop — the "obvious" fix provably fails, so a naive agent should edit, re-run, see the same
+crash, and circle:
+
+- **`c-decoy-hist`** — the crash surfaces in `tally()`, but the fix is an off-by-one in `capacity()`
+  two functions away.
+- **`c-grow-oob`** — a fixed buffer overflown by a PRNG-generated stream whose total size is not
+  knowable from the source; a bigger constant still overflows (only a dynamic buffer works).
+- **`c-namebuf`** — runtime-length names copied into a fixed struct field; bumping the constant to 32
+  still overflows (verified — only ≥ 48 works).
+
+Across these three tasks and four models (Haiku, Sonnet, Opus), **not one produced a loop.** Sonnet
+and Opus read through every trap and fixed the real site in a single edit; Haiku, when it engaged,
+jumped straight to a large-enough buffer, and otherwise simply failed to act (a weak agent, not a
+loop). The `loop:` signal never fired — there was nothing to break.
+
+This cleanly refutes the hypothesis that run-memory / anti-loop helps a *capable* model on tractable
+tasks: such models fix from source and do not circle. The signal's value therefore lives where a
+model genuinely cannot fix from source — real, source-insufficient bugs (large multi-file codebases,
+ARVO / SWE-bench), where even a frontier model must iterate over many runs. That is the open frontier
+(see the repo README / REPORT Future work), not something a self-contained synthetic task can show.
+
+Loop-probe tasks: `bench/tasks/{c-decoy-hist,c-grow-oob,c-namebuf}`.
+
+![Same fix, far less context](../docs/frontier-efficiency.svg)
+
 Raw data: [`bench/results/frontier-opus-sonnet.jsonl`](../bench/results/frontier-opus-sonnet.jsonl).

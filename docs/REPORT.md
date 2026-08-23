@@ -548,6 +548,40 @@ that engages the loop yet cannot self-verify) and the predicted positive — ste
 
 ---
 
+### 6.8 Frontier context-efficiency and the anti-loop boundary (Opus + Sonnet)
+
+§6.5 showed a capable model reads the source and barely looks at feedback. The follow-up asks the
+sharper question: *when the frontier model is forced to run the buggy program first* (the
+`--run-before-edit` control, so the raw arm actually receives the crash), what does the typed
+presentation buy? We drove **Claude Opus and Sonnet** turn-by-turn through the real hermetic sandbox
+across four C/C++ memory-safety bugs, comparing `raw` stdout against the typed Verdict + Delta.
+
+**Same fix, far less context.** Across seven clean pairs — identical success, identical fix locus —
+the typed arm showed the model **2.3–17.7× fewer characters** (median **2.8×**), and the reduction
+scales with output size: on the 18 KB use-after-free and 36 KB vector-overflow crashes it reaches
+9–18×. On Haiku the same episode cost **8× less** ($0.53 → $0.068). This is a context-efficiency
+result, not a capability one — both models solve every task under every condition — but it is real
+token / cost / latency saved for the same outcome, and it compounds across long agent sessions.
+
+![Same fix, far less context — on frontier models](frontier-efficiency.svg)
+
+**The anti-loop boundary — capable models don't loop on synthetic tasks.** The run-memory `loop:`
+signal (§4, `sbx history`) only helps if the agent actually circles. We built three tasks
+*engineered* to induce a loop — the obvious fix provably fails (`c-decoy-hist`, `c-grow-oob`,
+`c-namebuf`) — and ran them across Haiku, Sonnet, and Opus. **Not one produced a loop:** Sonnet and
+Opus read through every trap and fixed the real site in a single edit; Haiku either jumped straight
+to a correct-sized buffer or simply failed to act (a weak agent, not a loop). The signal never fired
+because there was nothing to break. This is an honest negative that *maps the boundary*: run-memory /
+anti-loop is not load-bearing for a capable model on a tractable, self-contained bug — its value
+lives where the model genuinely cannot fix from source (real, source-insufficient bugs; §9). The
+mechanism ships and is verified end-to-end (`sbx history`, consecutive-run streak detection); what
+remains open is a task regime that exercises it.
+
+Full data and interpretation: [`research/frontier-efficiency-result.md`](../research/frontier-efficiency-result.md);
+raw episodes in [`bench/results/frontier-opus-sonnet.jsonl`](../bench/results/frontier-opus-sonnet.jsonl).
+
+---
+
 ## 7. Discussion
 
 **Bytes vs turns.** The 3 B data already separate the two: the verdict is not smaller than raw on

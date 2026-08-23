@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 470" width="1200" height="470" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif"><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#12221f"/><stop offset="1" stop-color="#0d1719"/></linearGradient><linearGradient id="acc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2bc4b2"/><stop offset="1" stop-color="#63e0cf"/></linearGradient></defs><rect x="1" y="1" width="1198" height="468" rx="20" fill="url(#bg)" stroke="#24363b" stroke-width="1.5"/>
+<text x="40" y="50" fill="#eaf3f2" font-size="22" font-weight="700">Same fix, far less context — on frontier models</text>
+<text x="40" y="78" fill="#9fb4ba" font-size="14">Claude Opus and Sonnet driven as the agent (real hermetic sandbox, run-before-edit). Characters shown to the model per episode, log scale — same success, same fix locus.</text>
+<line x1="250" y1="116" x2="250" y2="416" stroke="#24363b"/>
+<text x="250" y="436" fill="#9fb4ba" font-size="12" text-anchor="middle" font-family="monospace">100</text>
+<line x1="555" y1="116" x2="555" y2="416" stroke="#24363b"/>
+<text x="555" y="436" fill="#9fb4ba" font-size="12" text-anchor="middle" font-family="monospace">1,000</text>
+<line x1="861" y1="116" x2="861" y2="416" stroke="#24363b"/>
+<text x="861" y="436" fill="#9fb4ba" font-size="12" text-anchor="middle" font-family="monospace">10,000</text>
+<text x="236" y="141" fill="#eaf3f2" font-size="13" text-anchor="end" font-family="monospace">Opus · cpp-vector-oob</text>
+<rect x="250" y="124" width="782" height="11" rx="2" fill="#7d5b52" opacity="0.85"/>
+<text x="1038" y="134" fill="#7d5b52" font-size="11" font-family="monospace">36,542</text>
+<rect x="250" y="139" width="401" height="11" rx="2" fill="url(#acc)"/>
+<text x="657" y="149" fill="#63e0cf" font-size="11" font-family="monospace">2,066</text>
+<text x="1155" y="141" fill="#63e0cf" font-size="15" font-weight="700" text-anchor="end">17.7x</text>
+<text x="236" y="184" fill="#eaf3f2" font-size="13" text-anchor="end" font-family="monospace">Opus · use-after-free</text>
+<rect x="250" y="167" width="691" height="11" rx="2" fill="#7d5b52" opacity="0.85"/>
+<text x="947" y="177" fill="#7d5b52" font-size="11" font-family="monospace">18,287</text>
+<rect x="250" y="182" width="397" height="11" rx="2" fill="url(#acc)"/>
+<text x="653" y="192" fill="#63e0cf" font-size="11" font-family="monospace">1,993</text>
+<text x="1155" y="184" fill="#63e0cf" font-size="15" font-weight="700" text-anchor="end">9.2x</text>
+<text x="236" y="227" fill="#eaf3f2" font-size="13" text-anchor="end" font-family="monospace">Sonnet · use-after-free</text>
+<rect x="250" y="210" width="689" height="11" rx="2" fill="#7d5b52" opacity="0.85"/>
+<text x="945" y="220" fill="#7d5b52" font-size="11" font-family="monospace">18,118</text>
+<rect x="250" y="225" width="360" height="11" rx="2" fill="url(#acc)"/>
+<text x="616" y="235" fill="#63e0cf" font-size="11" font-family="monospace">1,509</text>
+<text x="1155" y="227" fill="#63e0cf" font-size="15" font-weight="700" text-anchor="end">12.0x</text>
+<text x="236" y="270" fill="#eaf3f2" font-size="13" text-anchor="end" font-family="monospace">Opus · double-free</text>
+<rect x="250" y="253" width="509" height="11" rx="2" fill="#7d5b52" opacity="0.85"/>
+<text x="765" y="263" fill="#7d5b52" font-size="11" font-family="monospace">4,642</text>
+<rect x="250" y="268" width="393" height="11" rx="2" fill="url(#acc)"/>
+<text x="649" y="278" fill="#63e0cf" font-size="11" font-family="monospace">1,936</text>
+<text x="1155" y="270" fill="#63e0cf" font-size="15" font-weight="700" text-anchor="end">2.4x</text>
+<text x="236" y="313" fill="#eaf3f2" font-size="13" text-anchor="end" font-family="monospace">Sonnet · double-free</text>
+<rect x="250" y="296" width="506" height="11" rx="2" fill="#7d5b52" opacity="0.85"/>
+<text x="762" y="306" fill="#7d5b52" font-size="11" font-family="monospace">4,532</text>
+<rect x="250" y="311" width="375" height="11" rx="2" fill="url(#acc)"/>
+<text x="631" y="321" fill="#63e0cf" font-size="11" font-family="monospace">1,695</text>
+<text x="1155" y="313" fill="#63e0cf" font-size="15" font-weight="700" text-anchor="end">2.7x</text>
+<text x="236" y="356" fill="#eaf3f2" font-size="13" text-anchor="end" font-family="monospace">Opus · decoy-hist</text>
+<rect x="250" y="339" width="447" height="11" rx="2" fill="#7d5b52" opacity="0.85"/>
+<text x="703" y="349" fill="#7d5b52" font-size="11" font-family="monospace">2,904</text>
+<rect x="250" y="354" width="310" height="11" rx="2" fill="url(#acc)"/>
+<text x="566" y="364" fill="#63e0cf" font-size="11" font-family="monospace">1,035</text>
+<text x="1155" y="356" fill="#63e0cf" font-size="15" font-weight="700" text-anchor="end">2.8x</text>
+<text x="236" y="399" fill="#eaf3f2" font-size="13" text-anchor="end" font-family="monospace">Sonnet · decoy-hist</text>
+<rect x="250" y="382" width="446" height="11" rx="2" fill="#7d5b52" opacity="0.85"/>
+<text x="702" y="392" fill="#7d5b52" font-size="11" font-family="monospace">2,882</text>
+<rect x="250" y="397" width="336" height="11" rx="2" fill="url(#acc)"/>
+<text x="592" y="407" fill="#63e0cf" font-size="11" font-family="monospace">1,256</text>
+<text x="1155" y="399" fill="#63e0cf" font-size="15" font-weight="700" text-anchor="end">2.3x</text>
+<rect x="250" y="450" width="12" height="11" rx="2" fill="#7d5b52"/><text x="268" y="460" fill="#9fb4ba" font-size="12">raw stdout</text>
+<rect x="360" y="450" width="12" height="11" rx="2" fill="url(#acc)"/><text x="378" y="460" fill="#9fb4ba" font-size="12">typed verdict + delta</text>
+<text x="1060" y="104" fill="#9fb4ba" font-size="12" text-anchor="middle">reduction</text>
+<text x="40" y="448" fill="#9fb4ba" font-size="12.5">Median 2.8x, up to 17.7x. On Haiku the same episode cost <tspan fill="#eaf3f2">8x</tspan> less ($0.53 to $0.068). The gain scales with output size.</text>
+</svg>
