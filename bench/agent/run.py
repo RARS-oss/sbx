@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Experiment runner: tasks × conditions × seeds, N workers, resumable, with a summary table.
+"""Experiment runner: tasks x conditions x seeds, N workers, resumable, with a summary table.
 
   python bench/agent/run.py --tasks bench/tasks --conditions raw,truncate30k,structured,structured_delta \
       --seeds 3 --model claude-opus-5 --effort high --out bench/out/pilot.jsonl --workers 3
@@ -81,7 +81,7 @@ def summarize(out: Path) -> None:
     # per-task success matrix
     tasks = sorted({r["task"] for r in rows})
     conds = sorted({(r["condition"], r.get("mask")) for r in rows}, key=lambda cm: (cm[0], -1 if cm[1] is None else cm[1]))
-    print("\nsuccess by task × condition:")
+    print("\nsuccess by task x condition:")
     print(f"{'task':<24}" + "".join(f"{c}{'' if m is None else f'/m{m}'}"[:16].ljust(17) for c, m in conds))
     for t in tasks:
         line = f"{t:<24}"
