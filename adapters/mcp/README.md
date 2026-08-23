@@ -2,7 +2,7 @@
 
 Attach the hermetic executor to any [MCP](https://modelcontextprotocol.io) client — Claude Desktop,
 Cursor, Windsurf, Roo Code, Cline — so the model gets a **typed verdict + delta** instead of raw
-stdout, with no custom hook. One file, one dependency (`mcp`).
+stdout, with no custom hook. One file, one small dependency (`mcp<2` or `fastmcp`).
 
 ## Tools it exposes
 
@@ -14,9 +14,14 @@ stdout, with no custom hook. One file, one dependency (`mcp`).
 ## Install
 
 ```bash
-pip install mcp          # the MCP Python SDK
+pip install 'mcp<2'      # the MCP Python SDK (bundled FastMCP)  —  OR:  pip install fastmcp
 cargo build --release -p sbx-cli   # if you don't already have the sbx binary
 ```
+
+> The server imports `FastMCP` from the official SDK (`mcp.server.fastmcp`) and falls back to the
+> standalone `fastmcp` package, so either install works. Note `mcp` **2.0** moved FastMCP out of the
+> SDK, so a bare `pip install mcp` (which now resolves to 2.x) needs `pip install fastmcp` alongside it,
+> or just pin `'mcp<2'`. Verified end-to-end (stdio client → server → live sbx) on both.
 
 ## Configure (one block)
 

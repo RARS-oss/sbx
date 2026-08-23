@@ -125,10 +125,13 @@ def sbx_verdict(log_text: str, exit_code: int = 1) -> str:
 
 def main() -> None:
     try:
-        from mcp.server.fastmcp import FastMCP
+        from mcp.server.fastmcp import FastMCP        # bundled in the official SDK (mcp 1.x)
     except ImportError:
-        raise SystemExit("The MCP SDK is required: pip install mcp  (or: uvx --from mcp ...). "
-                         "See adapters/mcp/README.md.")
+        try:
+            from fastmcp import FastMCP               # standalone FastMCP 2.x (mcp 2.0 moved it out)
+        except ImportError:
+            raise SystemExit("The MCP SDK is required: `pip install 'mcp<2'` (bundled FastMCP) "
+                             "or `pip install fastmcp` (standalone). See adapters/mcp/README.md.")
     mcp = FastMCP("sbx")
 
     @mcp.tool()
