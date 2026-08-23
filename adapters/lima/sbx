@@ -1,0 +1,16 @@
+#!/bin/bash
+# Thin wrapper: run sbx inside the persistent Lima "sbx" VM as if it were a local binary.
+# Your working directory (under $HOME, which Lima mounts at the same path) maps 1:1 into the VM, so
+# paths in `--work` / `--overlay` / `--ro` resolve identically. Startup cost is paid once; the VM
+# stays up, so each call is fast.
+#
+#   ./adapters/lima/sbx run -- cargo test          # cwd is used as the work dir automatically
+#   ./adapters/lima/sbx run --work "$PWD/sub" -- pytest -q
+#   ./adapters/lima/sbx selftest
+#
+# Requires: `limactl start --name=sbx ./adapters/lima/sbx.yaml` (see sbx.yaml).
+set -euo pipefail
+if ! command -v limactl >/dev/null; then
+  echo "limactl not found — install Lima: brew install lima" >&2; exit 127
+fi
+exec limactl shell --workdir "$PWD" sbx sbx "$@"

@@ -142,7 +142,7 @@ sandbox-executor/
 │   ├── hermit-core/   # lib.rs (Spec/Outcome/run), child.rs (ns + mounts + exec), cgroup.rs, seccomp.rs, netlink.rs
 │   ├── feedback/      # lib.rs (Verdict types), parse.rs, delta.rs, render.rs, tests/fixtures/
 │   └── sbx-cli/       # the sbx binary
-├── adapters/          # claude-code/ (PostToolUse hook) · mcp/ (MCP server for any client)
+├── adapters/          # claude-code/ (hook) · mcp/ (MCP server) · lima/ (macOS via a Linux micro-VM)
 ├── bench/             # experiment harness: agent/, tasks/ (14 validated), swe/ (SWE-bench/ARVO runner), scripts/
 ├── docs/              # REPORT.md + report.html (the write-up), verdict-schema.md, hermetic-profile.md, figures
 └── research/          # prior-art survey, round-2 synthesis, the literature behind every claim
@@ -194,10 +194,10 @@ Ordered by value × tractability. Items marked † were independently recommende
 - **More language parsers.** Go (`go test`) and Node/TS (Jest, Vitest) shipped; next: Java/Kotlin (JUnit),
   richer Python tracebacks (+`rich`). The parsers are the product surface — each is a self-contained addition to
   `feedback/parse.rs` with a fixture test.
-- **Cross-platform via Lima / WSL.** A persistent Linux micro-VM behind the CLI (macOS
-  `Virtualization.framework` / Lima; the Windows path already runs through WSL) so `sbx` behaves the same
-  everywhere. (Native Linux namespaces don't exist on macOS/Windows — this is "ship a fast Linux VM," and the
-  per-run cost stays low because the VM is persistent.)
+- **Cross-platform via Lima / WSL — config shipped** (`adapters/lima/`). A persistent Linux micro-VM behind
+  the CLI (macOS Virtualization.framework via Lima; Windows already runs through WSL) so `sbx` behaves the same
+  everywhere. Native namespaces don't exist off Linux, so this is "ship a fast persistent VM"; the Lima config
+  + wrapper are authored to mirror the tested WSL path (not yet exercised on macOS in CI).
 
 **Sharper feedback.**
 - **Tree-sitter semantic deltas — shipped for C** (`feedback/src/scope.rs`). † Each diagnostic is AST-enriched

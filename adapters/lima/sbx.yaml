@@ -1,0 +1,59 @@
+# A Lima VM that builds and runs sbx, so the CLI works the same on macOS (and any host) as on Linux.
+#
+# sbx needs Linux user namespaces + seccomp + pivot_root — which don't exist natively on macOS or
+# Windows. The portable answer is a lightweight, *persistent* Linux VM behind the CLI: startup cost is
+# paid once (the VM stays up), so each `sbx run` is still fast. On Windows the equivalent is WSL (see
+# the bench harness's SBX_WSL bridge); on macOS it's Lima, on Apple's Virtualization.framework.
+#
+#   brew install lima
+#   limactl start --name=sbx ./adapters/lima/sbx.yaml     # first start builds sbx (~2-3 min)
+#   ./adapters/lima/sbx run --work "$PWD" -- <cmd>         # then use the wrapper (see ./sbx)
+#
+# NOTE: authored to match the tested WSL2 path; not yet run on macOS in this repo's CI.
+
+vmType: "vm"                       # Virtualization.framework on Apple silicon / recent macOS
+os: "Linux"
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+
+cpus: 4
+memory: "4GiB"
+disk: "20GiB"
+
+# Mount the host home read-write at the SAME path, so `--work "$PWD"` resolves identically in the VM.
+mounts:
+  - location: "~"
+    writable: true
+
+# Build sbx once, install it on PATH. Expects the repo checked out under your home (edit SBX_SRC if not).
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      apt-get update
+      apt-get install -y build-essential pkg-config curl git
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux
+      if ! command -v cargo >/dev/null; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      fi
+      source "$HOME/.cargo/env"
+      # Point this at your checkout; the default assumes ~/sbx (this repo).
+      SBX_SRC="${SBX_SRC:-$HOME/sbx}"
+      if [ -d "$SBX_SRC/crates/sbx-cli" ]; then
+        cargo install --path "$SBX_SRC/crates/sbx-cli" --force
+      else
+        echo "sbx source not found at $SBX_SRC — set SBX_SRC and re-run: limactl shell sbx" >&2
+      fi
+
+probes:
+  - description: "sbx on PATH"
+    script: |
+      #!/bin/bash
+      timeout 30s bash -c "until command -v sbx >/dev/null; do sleep 1; done"
