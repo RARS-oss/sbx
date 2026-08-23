@@ -1,0 +1,10 @@
+{
+  "instance_id": "mini-stats-1",
+  "repo_dir": "bench/swe/repos/mini-stats",
+  "problem_statement": "The tests in tests/ fail: stats.core.mean returns the wrong value for basic inputs. Find and fix the bug in the stats package without changing the tests. Keep the public API (mean, variance).",
+  "test_cmd": "python3 -m unittest -v test_core",
+  "protected": [
+    "test_core.py"
+  ],
+  "timeout": 120
+}

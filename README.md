@@ -131,7 +131,7 @@ hostile-multi-tenant jail; the full threat-model note is in [`docs/REPORT.md` §
 | **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, **go test, Jest/Vitest**, tracebacks, signals |
 | **Differential feedback** | `feedback/src/delta.rs` — diff of two runs (crash moved / SAME, tests fixed / broken), matched **by AST scope** (`feedback/src/scope.rs`, tree-sitter) so a diagnostic survives a refactor, else line-shift-tolerant |
 | **Causal experiment design** | `bench/` — byte-identical execution, single-field verdict corruption, first-edit-locus readout, matched controls |
-| **Three-tier agent harness** | `bench/agent/agent.py` — Anthropic SDK · Ollama · Claude Code CLI backends, cache-aware cost accounting |
+| **Three-tier agent harness** | `bench/agent/agent.py` — Anthropic SDK · Ollama · Claude Code CLI backends, `list_files`/`read_file`/`write_file`/`run` tools, cache-aware cost |
 | **Property / fuzz testing** | 300 mutated inputs → 0 failures; 17 unit/integration tests; `clippy -D warnings` clean |
 
 ## How it's built
@@ -143,7 +143,7 @@ sandbox-executor/
 │   ├── feedback/      # lib.rs (Verdict types), parse.rs, delta.rs, render.rs, tests/fixtures/
 │   └── sbx-cli/       # the sbx binary
 ├── adapters/          # claude-code/ (PostToolUse hook) · mcp/ (MCP server for any client)
-├── bench/             # experiment harness: agent/, tasks/ (14 validated), scripts/ (steer_run, steer_analyze, plot)
+├── bench/             # experiment harness: agent/, tasks/ (14 validated), swe/ (SWE-bench/ARVO runner), scripts/
 ├── docs/              # REPORT.md + report.html (the write-up), verdict-schema.md, hermetic-profile.md, figures
 └── research/          # prior-art survey, round-2 synthesis, the literature behind every claim
 ```
@@ -177,9 +177,11 @@ Ordered by value × tractability. Items marked † were independently recommende
 [`research/`](research/).
 
 **Prove it at scale — the decisive experiment.**
-- **Real benchmarks: SWE-bench · ARVO · SEC-bench.** † The causal study (§6.7) showed the turn/cost win is a
-  large-repo / must-iterate phenomenon; the honest way to measure token- and success-gains on multi-file
-  repair is to run *there*, not on 14 single-file tasks. **This is #1.**
+- **Real benchmarks: SWE-bench · ARVO · SEC-bench — runner shipped** (`bench/swe/`). † `swe_run.py` runs the
+  agent loop on multi-file repo instances (a `list_files` tool was added for exploration) and reports
+  pass/turns/tokens per condition; a synthetic instance ships, and `bench/swe/README.md` shows how to point
+  it at the real SWE-bench (git checkout + test_patch) or ARVO (sanitizer PoC as the oracle). Running the
+  full datasets (per-instance envs) is the remaining infra step. **The #1 measurement.**
 - **`overlayfs` — shipped** as `sbx run --overlay <repo>`. † The repo is the read-only lower (mounted, not
   copied); the agent's edits land in `<work>/upper`, the repo untouched. Enables the large-repo benchmarks
   above, and is the seam for COW snapshot/fork of the work dir.

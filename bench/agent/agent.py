@@ -59,7 +59,8 @@ PRICES = {
 CONDITIONS = ["raw", "truncate30k", "truncate10k", "regex", "structured", "structured_delta", "no_feedback"]
 
 SYSTEM = """You are an expert software engineer fixing a bug in a small project inside a sandbox.
-You have four tools: read_file, write_file, run, done.
+You have five tools: read_file, list_files, write_file, run, done.
+- `list_files` lists the project's files — use it first on a multi-file project to find what to read.
 - `run` builds and tests the project (it runs the project's fixed test command) and returns the result.
 - Edit files only with write_file (write the complete new file content).
 - Do not modify the test script or change the program's output format.
@@ -72,6 +73,11 @@ TOOLS = [
         "name": "read_file",
         "description": "Read a text file from the project. Returns its full content.",
         "input_schema": {"type": "object", "properties": {"path": {"type": "string", "description": "Path relative to the project root"}}, "required": ["path"]},
+    },
+    {
+        "name": "list_files",
+        "description": "List the project's files (recursive tree, relative paths). Use it to explore a multi-file repository before reading or editing.",
+        "input_schema": {"type": "object", "properties": {"path": {"type": "string", "description": "Subdirectory to list (default: project root)"}}, "additionalProperties": False},
     },
     {
         "name": "write_file",
@@ -851,8 +857,9 @@ reads your JSON, performs the action for you, and sends back the result as the n
 
 You DO have full ability to read, edit and run — you exercise it through the JSON, not through any
 Claude Code tool. Never say you are unable to edit or that the system blocks file operations: to
-change a file you simply emit a write_file JSON and the harness writes it. The four actions:
+change a file you simply emit a write_file JSON and the harness writes it. The five actions:
 
+  {"name":"list_files","arguments":{}}
   {"name":"read_file","arguments":{"path":"histogram.c"}}
   {"name":"write_file","arguments":{"path":"histogram.c","content":"<the COMPLETE new file text>"}}
   {"name":"run","arguments":{}}
@@ -1042,7 +1049,7 @@ def content_for_history(content) -> list:
 @dataclass
 class Metrics:
     turns: int = 0
-    tool_calls: dict = field(default_factory=lambda: {"read_file": 0, "write_file": 0, "run": 0, "done": 0, "invalid": 0})
+    tool_calls: dict = field(default_factory=lambda: {"read_file": 0, "list_files": 0, "write_file": 0, "run": 0, "done": 0, "invalid": 0})
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
@@ -1196,6 +1203,20 @@ def run_episode(task: Task, condition: str, model: str, effort: str, max_turns: 
                     res = f"error: no such file: {inp.get('path')}"
                 else:
                     res = p.read_text(errors="replace")
+            elif name == "list_files":
+                m.tool_calls["list_files"] += 1
+                base = (work / str(inp.get("path", ""))).resolve()
+                if not _within(base, work) or not base.is_dir():
+                    res = f"error: no such directory: {inp.get('path')}"
+                else:
+                    rels = []
+                    for f in sorted(base.rglob("*")):
+                        if f.is_file() and ".sbx" not in f.parts and ".git" not in f.parts:
+                            rels.append(str(f.relative_to(work)).replace("\\", "/"))
+                        if len(rels) >= 500:
+                            rels.append("... (truncated at 500 files)")
+                            break
+                    res = "\n".join(rels) if rels else "(no files)"
             elif name == "write_file":
                 m.tool_calls["write_file"] += 1
                 rel = str(inp.get("path", ""))
