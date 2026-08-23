@@ -8,7 +8,7 @@ stdout, with no custom hook. One file, one dependency (`mcp`).
 
 | Tool | What it does |
 |---|---|
-| `run(command, cwd?, timeout?)` | Run a shell command (build / test / execute) in a throw-away sbx sandbox; returns the typed Verdict — parsed diagnostics, crash object with the first user frame, failing tests by root cause — plus a **Delta** vs your previous `run` in the same directory (`crash SAME`, `2 tests fixed, 1 new`). |
+| `run(command, cwd?, timeout?)` | Run a shell command in a throw-away sbx sandbox; returns the typed Verdict as MCP **`structuredContent`** (behind an `outputSchema`): `{status, exit_code, crash{kind,first_user_frame,offset,…}, diagnostics[], tests{}, delta{}, rendered}` — the client reads the error as an object. `delta` is what changed vs your previous `run` in that dir (`crash SAME`, `2 tests fixed`). |
 | `verdict(log, exit_code?)` | Distill an already-captured build/test log (e.g. a CI artifact) into the same typed verdict, without running anything. |
 
 ## Install

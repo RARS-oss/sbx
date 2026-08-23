@@ -20,9 +20,23 @@ Run it directly for a stdio server:  python adapters/mcp/sbx_mcp.py
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any, Optional, TypedDict
+
+
+class SbxResult(TypedDict):
+    """The typed run-result the MCP server returns as `structuredContent` (behind an outputSchema),
+    so a client reads the error as an object — no re-parsing of a text blob."""
+    status: Optional[str]        # pass | tests_failed | crash | build_failed | runtime_error | timeout | ...
+    exit_code: Optional[int]
+    rendered: str                # the compact verdict text (human/agent-facing summary)
+    crash: Optional[dict[str, Any]]        # {tool, kind, access, region, first_user_frame, alloc/free, ...}
+    diagnostics: list[dict[str, Any]]      # [{tool, severity, file, line, message, scope}, ...]
+    tests: Optional[dict[str, Any]]        # {runner, passed, failed, failures[]}
+    delta: Optional[dict[str, Any]]        # what changed vs the previous run in this dir
 
 
 def _to_wsl_path(p: str) -> str:
@@ -60,6 +74,39 @@ def sbx_run(command: str, cwd: str | None = None, timeout: int = 120) -> str:
     return out if out else (r.stderr or "").strip() or "(no output)"
 
 
+def _err_result(rendered: str) -> SbxResult:
+    return {"status": "error", "exit_code": None, "rendered": rendered,
+            "crash": None, "diagnostics": [], "tests": None, "delta": None}
+
+
+def sbx_run_json(command: str, cwd: str | None = None, timeout: int = 120) -> SbxResult:
+    """Run `command` inside sbx and return the TYPED verdict (+ delta) — the structured form the
+    MCP `run` tool exposes as structuredContent."""
+    work = cwd or os.environ.get("SBX_WORK") or os.getcwd()
+    argv, _ = _base_argv(work, timeout, ["--json", "--", "sh", "-c", command])
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=timeout + 30)
+    except FileNotFoundError:
+        return _err_result("error: `sbx` not found. Set SBX_BIN, or SBX_WSL on a Windows host.")
+    except subprocess.TimeoutExpired:
+        return {**_err_result(f"error: sbx timed out after {timeout}s"), "status": "timeout"}
+    try:
+        full = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return _err_result((r.stderr or r.stdout or "sbx produced no JSON").strip()[:500])
+    v = full.get("verdict") or {}
+    return {
+        "status": v.get("status"),
+        "exit_code": v.get("exit_code"),
+        "rendered": full.get("rendered", ""),
+        "crash": v.get("crash"),
+        "diagnostics": v.get("diagnostics", []),
+        "tests": v.get("tests"),
+        "delta": full.get("delta"),
+    }
+
+
 def sbx_verdict(log_text: str, exit_code: int = 1) -> str:
     """Distill an already-captured log into the typed verdict (no execution)."""
     wsl = os.environ.get("SBX_WSL")
@@ -85,17 +132,19 @@ def main() -> None:
     mcp = FastMCP("sbx")
 
     @mcp.tool()
-    def run(command: str, cwd: str = "", timeout: int = 120) -> str:
+    def run(command: str, cwd: str = "", timeout: int = 120) -> SbxResult:
         """Run a shell command (build/test/execute) in a hermetic, deterministic sbx sandbox and
-        return a compact TYPED verdict — parsed compiler diagnostics, sanitizer/crash object with the
-        first user frame, failing tests by root cause — plus a DELTA vs your previous run in the same
-        directory ("crash moved / SAME", "2 tests fixed, 1 new"). Prefer this over reading raw stdout.
+        return a TYPED verdict as structured data — {status, crash{kind,first_user_frame,offset,...},
+        diagnostics[], tests{}, delta{}, rendered} — so you read the error as an object, not a text
+        blob. `delta` is what changed vs your previous run in the same directory ("crash SAME",
+        "2 tests fixed, 1 new"). `rendered` is the compact human-facing summary. Prefer this over
+        reading raw stdout.
 
         command: the shell command to run (e.g. "cargo test", "pytest -q", "go test ./...").
         cwd:     working directory (default: SBX_WORK or the server's cwd).
         timeout: seconds before the run is killed (default 120).
         """
-        return sbx_run(command, cwd or None, timeout)
+        return sbx_run_json(command, cwd or None, timeout)
 
     @mcp.tool()
     def verdict(log: str, exit_code: int = 1) -> str:

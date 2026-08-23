@@ -188,9 +188,10 @@ Ordered by value × tractability. Items marked † were independently recommende
   above, and is the seam for COW snapshot/fork of the work dir.
 
 **Make it adoptable.**
-- **MCP server — shipped** (`adapters/mcp/`). † Claude Desktop / Cursor / Windsurf / Roo Code attach sbx with
-  one config block (`run` + `verdict` tools, no custom hook). Next: emit the Verdict as MCP `structuredContent`
-  behind a versioned `sbx.run-result` `outputSchema`.
+- **MCP server — shipped, with structured output** (`adapters/mcp/`). † Claude Desktop / Cursor / Windsurf /
+  Roo Code attach sbx with one config block. The `run` tool returns the Verdict as MCP `structuredContent`
+  (typed `{status, crash{kind,first_user_frame,offset}, diagnostics[], tests{}, delta{}, rendered}`) behind an
+  `outputSchema` — the client reads the error as an object, not a text blob.
 - **More language parsers.** Go (`go test`) and Node/TS (Jest, Vitest) shipped; next: Java/Kotlin (JUnit),
   richer Python tracebacks (+`rich`). The parsers are the product surface — each is a self-contained addition to
   `feedback/parse.rs` with a fixture test.

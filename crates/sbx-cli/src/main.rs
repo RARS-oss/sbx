@@ -219,13 +219,18 @@ fn main() -> Result<()> {
                     outcome: &'a hermit_core::Outcome,
                     verdict: &'a Verdict,
                     delta: &'a Option<feedback::Delta>,
+                    /// The compact rendered verdict text — so a consumer (e.g. the MCP server) gets
+                    /// both the typed object and the human/agent-facing summary from one run.
+                    rendered: String,
                 }
+                let rendered = feedback::render(&verdict, delta.as_ref(), &RenderOpts::default());
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&Full {
                         outcome: &outcome,
                         verdict: &verdict,
-                        delta: &delta
+                        delta: &delta,
+                        rendered,
                     })?
                 );
             } else if raw {
