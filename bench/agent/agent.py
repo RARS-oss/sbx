@@ -342,6 +342,9 @@ def sbx_run(workdir: Path, task: Task, keep_delta: bool) -> dict:
             base += ["--env", f"{k}={v}"]
     if not keep_delta:
         base.append("--no-delta")
+    if os.environ.get("SBX_NO_SANDBOX"):
+        # restricted host (unprivileged container / rented GPU pod): run directly, no namespaces.
+        base.append("--no-sandbox")
     # JSON for metrics, text for the structured conditions. Two invocations would execute twice,
     # so we run once with --json and render the text from the saved state with `sbx verdict`.
     # sbx emits UTF-8 (…, —, box-drawing chars in verdicts). Decode as UTF-8 explicitly: the process
