@@ -55,3 +55,21 @@ fn vitest_is_parsed() {
     assert_eq!(f.file.as_deref(), Some("src/sum.test.ts"));
     assert_eq!(f.line, Some(11));
 }
+
+#[test]
+fn junit_surefire_is_parsed() {
+    let v = run(include_str!("fixtures/junit_surefire.txt"));
+    let t = v.tests.clone().expect("tests");
+    assert_eq!(t.runner, "junit");
+    assert_eq!((t.passed, t.failed), (2, 1));
+    assert!(t.failures.iter().any(|f| f.name == "com.example.CalcTest.testAdd"), "{:?}", t.failures);
+}
+
+#[test]
+fn junit_gradle_is_parsed() {
+    let v = run(include_str!("fixtures/junit_gradle.txt"));
+    let t = v.tests.clone().expect("tests");
+    assert_eq!(t.runner, "junit");
+    assert_eq!(t.failed, 1);
+    assert!(t.failures.iter().any(|f| f.name.contains("testAdd")), "{:?}", t.failures);
+}

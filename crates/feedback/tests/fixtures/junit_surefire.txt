@@ -1,0 +1,16 @@
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.example.CalcTest
+[ERROR] Tests run: 3, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.05 s <<< FAILURE! - in com.example.CalcTest
+[ERROR] testAdd(com.example.CalcTest)  Time elapsed: 0.01 s  <<< FAILURE!
+org.opentest4j.AssertionFailedError: expected: <5> but was: <4>
+	at com.example.CalcTest.testAdd(CalcTest.java:12)
+
+[INFO] Results:
+[INFO]
+[ERROR] Failures:
+[ERROR]   CalcTest.testAdd:12 expected: <5> but was: <4>
+[INFO]
+[ERROR] Tests run: 3, Failures: 1, Errors: 0, Skipped: 0
+[INFO]

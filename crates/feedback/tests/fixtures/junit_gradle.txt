@@ -1,0 +1,7 @@
+> Task :test FAILED
+
+com.example.CalcTest > testAdd FAILED
+    org.opentest4j.AssertionFailedError: expected: <5> but was: <4>
+        at app//com.example.CalcTest.testAdd(CalcTest.java:12)
+
+3 tests completed, 1 failed

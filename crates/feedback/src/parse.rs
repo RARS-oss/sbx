@@ -123,6 +123,10 @@ static RE_CARGO_PANIC: Lazy<Regex> = Lazy::new(|| {
 });
 static RE_PY_TRACE_LOC: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"^\s*File "([^"]+)", line (\d+), in (.+)$"#).unwrap());
+// rich.traceback frame inside a box:  │ /app/main.py:8 in divide │   (trailing box char optional)
+static RE_PY_RICH_LOC: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"[│┃]\s*([\w./\\-]+\.(?:py|pyi)):(\d+) in (\S.*?)\s*[│┃]?\s*$").unwrap()
+});
 static RE_PY_EXC: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^([A-Z][A-Za-z0-9_.]*(?:Error|Exception|Exit|Interrupt|Warning)): (.*)$").unwrap()
 });
@@ -142,6 +146,17 @@ static RE_GO_LOC: Lazy<Regex> =
 static RE_JEST_SUMMARY: Lazy<Regex> = Lazy::new(|| Regex::new(r"^Tests:\s+(.+)$").unwrap());
 static RE_VITEST_SUMMARY: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^\s*Tests\s+([0-9].+?)\s*\((\d+)\)\s*$").unwrap());
+// JUnit — Maven Surefire ("Tests run: 5, Failures: 1, Errors: 0, Skipped: 0" + "m(Class) … <<< FAILURE!")
+// and Gradle ("com.example.FooTest > testBar FAILED").
+static RE_JUNIT_SUMMARY: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"Tests run: (\d+), Failures: (\d+), Errors: (\d+)(?:, Skipped: (\d+))?").unwrap()
+});
+static RE_JUNIT_FAIL: Lazy<Regex> = Lazy::new(|| {
+    // Maven prefixes lines with "[ERROR] "/"[INFO] "; allow it.
+    Regex::new(r"^(?:\[\w+\]\s+)?(\S+?)\((\S+?)\)\s+Time elapsed:.*<<< (?:FAILURE|ERROR)!").unwrap()
+});
+static RE_GRADLE_FAIL: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^(\S+(?:\.\S+)*) > (\S.*?) (FAILED|PASSED)\s*$").unwrap());
 // a failing test line in either (● jest, × / ✕ / ✗ vitest); ✓ (pass) is deliberately excluded.
 static RE_JS_FAILNAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(?:●|✕|✗|×)\s+(.+\S)\s*$").unwrap());
 static RE_JS_LOC: Lazy<Regex> =
@@ -770,6 +785,70 @@ fn parse_check_script(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<T
     }
 }
 
+/// JUnit — Maven Surefire (a "Tests run: N, Failures: F, Errors: E, Skipped: S" summary + per-method
+/// "method(Class) … <<< FAILURE!/ERROR!") and Gradle ("Class > method FAILED/PASSED").
+fn parse_junit(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Tests> {
+    let mut t = Tests {
+        runner: "junit".into(),
+        ..Default::default()
+    };
+    let mut seen = false;
+    let mut saw_summary = false;
+    for (i, raw) in lines.iter().enumerate() {
+        let l = raw.trim_end();
+        if let Some(c) = RE_JUNIT_SUMMARY.captures(l) {
+            let run: u32 = c[1].parse().unwrap_or(0);
+            let fail: u32 = c[2].parse().unwrap_or(0);
+            let err: u32 = c[3].parse().unwrap_or(0);
+            let skip: u32 = c.get(4).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            // Surefire prints a summary per class and a final total; the total is the largest.
+            t.failed = t.failed.max(fail);
+            t.errors = t.errors.max(err);
+            t.skipped = t.skipped.max(skip);
+            t.passed = t.passed.max(run.saturating_sub(fail + err + skip));
+            seen = true;
+            saw_summary = true;
+            claimed.insert(i);
+        } else if let Some(c) = RE_JUNIT_FAIL.captures(l) {
+            seen = true;
+            claimed.insert(i);
+            let name = format!("{}.{}", &c[2], &c[1]); // Class.method
+            if !t.failures.iter().any(|f| f.name == name) {
+                t.failures.push(TestFailure {
+                    name,
+                    file: None,
+                    line: None,
+                    message: None,
+                });
+            }
+        } else if let Some(c) = RE_GRADLE_FAIL.captures(l) {
+            seen = true;
+            claimed.insert(i);
+            if &c[3] == "FAILED" {
+                let name = format!("{} > {}", &c[1], c[2].trim());
+                if !t.failures.iter().any(|f| f.name == name) {
+                    t.failures.push(TestFailure {
+                        name,
+                        file: None,
+                        line: None,
+                        message: None,
+                    });
+                }
+            } else {
+                t.passed += 1;
+            }
+        }
+    }
+    if !seen {
+        return None;
+    }
+    // No Surefire summary (pure Gradle): failed = the FAILED lines we collected.
+    if !saw_summary {
+        t.failed = t.failures.len() as u32;
+    }
+    Some(t)
+}
+
 /// `go test` (optionally `-v`). Counts `--- PASS/FAIL/SKIP`; a `t.Errorf` location that printed
 /// before the `--- FAIL` line is buffered and attached to that failure.
 fn parse_gotest(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Tests> {
@@ -1046,6 +1125,9 @@ fn parse_tests(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Option<Tests> {
         }
         return Some(gt);
     }
+    if let Some(t) = parse_junit(lines, claimed) {
+        return Some(t);
+    }
     if let Some(t) = parse_gotest(lines, claimed) {
         return Some(t);
     }
@@ -1166,7 +1248,7 @@ fn parse_python_exception(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Opti
     let mut in_tb = false;
     for (i, raw) in lines.iter().enumerate() {
         let l = raw.trim_end();
-        if l.starts_with("Traceback (most recent call last):") {
+        if l.contains("Traceback (most recent call last)") {
             in_tb = true;
             frames.clear();
             claimed.insert(i);
@@ -1187,6 +1269,21 @@ fn parse_python_exception(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Opti
                 claimed.insert(i);
                 continue;
             }
+            if let Some(c) = RE_PY_RICH_LOC.captures(l) {
+                // rich.traceback boxed frame: "│ /app/main.py:8 in divide │"
+                let file = c.get(1).unwrap().as_str().to_string();
+                let user = is_user_path(&file);
+                frames.push(Frame {
+                    idx: frames.len() as u32,
+                    func: Some(c.get(3).unwrap().as_str().trim().to_string()),
+                    file: Some(file),
+                    line: c.get(2).unwrap().as_str().parse().ok(),
+                    col: None,
+                    user,
+                });
+                claimed.insert(i);
+                continue;
+            }
             if let Some(c) = RE_PY_EXC.captures(l) {
                 exc = Some((
                     c.get(1).unwrap().as_str().to_string(),
@@ -1196,8 +1293,14 @@ fn parse_python_exception(lines: &[&str], claimed: &mut BTreeSet<usize>) -> Opti
                 in_tb = false;
                 continue;
             }
-            // source line echo under a File line
-            if l.starts_with("    ") {
+            // source-line echo under a File line, or a rich.traceback box-drawing line
+            let ts = l.trim_start();
+            if l.starts_with("    ")
+                || ts.starts_with('│')
+                || ts.starts_with('┃')
+                || ts.starts_with('╭')
+                || ts.starts_with('╰')
+            {
                 claimed.insert(i);
             }
         }

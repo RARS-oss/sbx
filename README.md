@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2021-000?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/tests-24%20passing-2f8f5b" alt="tests">
+  <img src="https://img.shields.io/badge/tests-27%20passing-2f8f5b" alt="tests">
   <img src="https://img.shields.io/badge/clippy%20%2B%20fmt-clean-2f8f5b" alt="lint">
   <img src="https://img.shields.io/badge/startup-4.6%20ms-2bc4b2" alt="startup 4.6 ms">
   <img src="https://img.shields.io/badge/no%20root-unprivileged-2bc4b2" alt="no root">
@@ -128,7 +128,7 @@ hostile-multi-tenant jail; the full threat-model note is in [`docs/REPORT.md` §
 | **seccomp-bpf syscall filtering** | `crates/hermit-core/src/seccomp.rs` — EPERM denylist: `io_uring`, `bpf`, `ptrace`, `mount`, `AF_ALG`, ~40 families |
 | **Netlink by hand** | `netlink.rs` — brings loopback `UP` inside the net namespace with no `ip` binary |
 | **Deterministic execution** | fixed env, no ASLR, frozen clock/seed — the precondition for run-to-run deltas |
-| **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, **go test, Jest/Vitest**, tracebacks, signals + AST scopes (C/C++/Rust/Python/Go) |
+| **Typed feedback parsing** | `feedback/src/parse.rs` — ASan/UBSan/LSan/TSan, gcc/clang/rustc, pytest/cargo/ctest/gtest, **go test, Jest/Vitest, JUnit**, tracebacks (incl. `rich`), signals + AST scopes (C/C++/Rust/Python/Go) |
 | **Differential feedback** | `feedback/src/delta.rs` — diff of two runs (crash moved / SAME, tests fixed / broken), matched **by AST scope** (`feedback/src/scope.rs`, tree-sitter) so a diagnostic survives a refactor, else line-shift-tolerant |
 | **Causal experiment design** | `bench/` — byte-identical execution, single-field verdict corruption, first-edit-locus readout, matched controls |
 | **Three-tier agent harness** | `bench/agent/agent.py` — Anthropic SDK · Ollama · Claude Code CLI backends, `list_files`/`read_file`/`write_file`/`run` tools, cache-aware cost |
@@ -151,7 +151,7 @@ sandbox-executor/
 ## Build &amp; test
 
 ```bash
-cargo test --workspace                    # 24 tests
+cargo test --workspace                    # 27 tests
 cargo run -p sbx-cli -- selftest          # prints what isolation held on this kernel
 cargo run -p sbx-cli -- bench --n 30      # startup latency
 cargo run -p sbx-cli -- run --work /tmp/x -- sh -c 'gcc -fsanitize=address a.c && ./a.out'
@@ -192,9 +192,10 @@ Ordered by value × tractability. Items marked † were independently recommende
   Roo Code attach sbx with one config block. The `run` tool returns the Verdict as MCP `structuredContent`
   (typed `{status, crash{kind,first_user_frame,offset}, diagnostics[], tests{}, delta{}, rendered}`) behind an
   `outputSchema` — the client reads the error as an object, not a text blob.
-- **More language parsers.** Go (`go test`) and Node/TS (Jest, Vitest) shipped; next: Java/Kotlin (JUnit),
-  richer Python tracebacks (+`rich`). The parsers are the product surface — each is a self-contained addition to
-  `feedback/parse.rs` with a fixture test.
+- **More language parsers — shipped.** Go (`go test`), Node/TS (Jest, Vitest), JVM (JUnit — Maven Surefire +
+  Gradle), and `rich` Python tracebacks, on top of pytest/unittest/cargo/ctest/gtest. Each is a self-contained
+  parser in `feedback/parse.rs` with a fixture test (pytest-xdist / `uv` emit standard pytest output, already
+  handled).
 - **Cross-platform via Lima / WSL — config shipped** (`adapters/lima/`). A persistent Linux micro-VM behind
   the CLI (macOS Virtualization.framework via Lima; Windows already runs through WSL) so `sbx` behaves the same
   everywhere. Native namespaces don't exist off Linux, so this is "ship a fast persistent VM"; the Lima config

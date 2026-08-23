@@ -1,0 +1,10 @@
+╭───────────────── Traceback (most recent call last) ──────────────────╮
+│ /app/main.py:10 in <module>                                          │
+│                                                                      │
+│    8 │   return x / y                                                │
+│ ❱ 10 divide(1, 0)                                                    │
+│                                                                      │
+│ /app/main.py:8 in divide                                             │
+│ ❱  8 │   return x / y                                                │
+╰──────────────────────────────────────────────────────────────────────╯
+ZeroDivisionError: division by zero
