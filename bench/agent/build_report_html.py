@@ -54,7 +54,7 @@ def inline(s: str) -> str:
     return s
 
 
-def convert(md: str, figs: Path) -> str:
+def convert(md: str, figs: Path, base: Path) -> str:
     out: list[str] = []
     lines = md.splitlines()
     i = 0
@@ -154,6 +154,20 @@ def convert(md: str, figs: Path) -> str:
             maybe_figures(line)
             i += 1
             continue
+        m = re.match(r"^!\[([^\]]*)\]\(([^)]+\.svg)\)\s*$", line)
+        if m:
+            flush_para(); flush_list()
+            alt, src = m.group(1), m.group(2)
+            p = base / src
+            if p.exists():
+                svg = p.read_text(encoding="utf-8")
+                svg = re.sub(r"<\?xml[^>]*\?>", "", svg)
+                svg = re.sub(r"<!DOCTYPE[^>]*>", "", svg)
+                out.append(f"<figure>{svg}<figcaption>{html.escape(alt or src)}</figcaption></figure>")
+            else:
+                out.append(f'<p class="meta">figure pending: {html.escape(src)}</p>')
+            i += 1
+            continue
         m = re.match(r"^\s*[-*]\s+(.*)$", line)
         if m:
             flush_para()
@@ -184,7 +198,7 @@ def main():
     ap.add_argument("--title", default="sbx Technical Report")
     a = ap.parse_args()
     md = a.md.read_text(encoding="utf-8")
-    body = convert(md, a.figs)
+    body = convert(md, a.figs, a.md.parent)
     page = f"<title>{html.escape(a.title)}</title>\n{FONTS}\n<style>{CSS}</style>\n<div class=\"wrap\">\n{body}\n</div>\n"
     a.out.write_text(page, encoding="utf-8")
     print(f"wrote {a.out} ({len(page)} bytes)")
