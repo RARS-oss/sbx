@@ -113,6 +113,9 @@ RUN_DESC_STRUCTURED = (
 RUN_DESC_DELTA = RUN_DESC_STRUCTURED + (
     "\n  delta: ...                         what changed vs. your PREVIOUS run (diagnostics fixed/new, tests fixed/broken,\n"
     "                                     crash gone/new/moved/SAME). `crash: SAME as last run` means your edit did not affect the crash."
+    "\n  loop: ...                          run-memory guard across your recent runs: `N runs in a row with the SAME verdict`\n"
+    "                                     (your edits aren't landing — change locus) or `X has survived N runs` (that error is a\n"
+    "                                     red herring, not the fix site). When you see a `loop:` line, stop repeating and try elsewhere."
 )
 RUN_DESC_NOFEEDBACK = "Build and run the project's tests (the fixed test command). Returns only whether the tests passed and the exit status — no program output."
 
@@ -252,6 +255,22 @@ def obs_regex(outcome: dict, cap: int = 8_000) -> str:
     return txt
 
 
+def render_loop(ls: dict | None) -> str:
+    """Python mirror of feedback::history::LoopSignals::render — the `loop:` anti-loop lines that
+    the run-memory arm adds on top of the verdict + delta. Kept trivially in parity with the Rust."""
+    if not ls:
+        return ""
+    out = ""
+    vs = ls.get("verdict_streak", 0) or 0
+    if vs >= 2:
+        out += (f"loop: {vs} runs in a row with the SAME verdict — recent edits changed nothing; "
+                "try a different locus\n")
+    for s in ls.get("stuck", []) or []:
+        out += (f"loop: {s.get('what')} has survived {s.get('streak')} runs unchanged — "
+                "likely a red herring, not the fix site\n")
+    return out
+
+
 def shape(condition: str, sbx_json: dict, corrupt: dict | None = None) -> str:
     outcome = sbx_json["outcome"]
     if condition == "raw":
@@ -275,9 +294,12 @@ def shape(condition: str, sbx_json: dict, corrupt: dict | None = None) -> str:
             apply_corruption(v, corrupt)
             d = sbx_json.get("delta") if condition == "structured_delta" else None
             return render_like_sbx(v, d)
-        # sbx's rendered text is not in --json output; render via `sbx verdict`? Cheaper: render here
-        # from the verdict/delta dicts using the same rules would duplicate logic, so we ask sbx.
-        return sbx_json["_rendered"]
+        base = sbx_json["_rendered"]
+        if condition == "structured_delta":
+            # run-memory: append the anti-loop signals. Only the delta arm keeps state across the
+            # episode's runs, so it is the only one that can warn "you're circling this red herring".
+            base += render_loop(sbx_json.get("loop_signals"))
+        return base
     raise ValueError(condition)
 
 
