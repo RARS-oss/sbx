@@ -170,6 +170,43 @@ C/C++/Rust/Python repair tasks, and the causal study above. The open frontier is
 (SEC-bench / ARVO / multi-file), where a strong model *must* iterate — the regime in which the turn- and
 cost-reductions this design predicts become measurable on a frontier model.
 
+## Roadmap
+
+Ordered by value × tractability. Items marked † were independently recommended by the round-2 research in
+[`research/`](research/).
+
+**Prove it at scale — the decisive experiment.**
+- **Real benchmarks: SWE-bench · ARVO · SEC-bench.** † The causal study (§6.7) showed the turn/cost win is a
+  large-repo / must-iterate phenomenon; the honest way to measure token- and success-gains on multi-file
+  repair is to run *there*, not on 14 single-file tasks. **This is #1.**
+- **`overlayfs` instead of `tmpfs`.** A read-only lower (the repo) + a writable upper (the agent's edits) so a
+  large repo isn't copied into RAM every run — a prerequisite for the benchmarks above, and the seam for
+  COW snapshot/fork of the work dir †.
+
+**Make it adoptable.**
+- **A native MCP server.** † Expose the Verdict as MCP `structuredContent` behind a versioned `sbx.run-result`
+  schema, so Cursor / Windsurf / Claude Desktop / Roo Code attach the tool with one config line — no custom
+  hook. Highest adoption lever.
+- **More language parsers.** Node/TS (Jest, Vitest), Go (`go test`), richer Python tracebacks (+`rich`),
+  Java/Kotlin. The parsers are the product surface; each is a self-contained addition to `feedback/parse.rs`.
+- **Cross-platform via Lima / WSL.** A persistent Linux micro-VM behind the CLI (macOS
+  `Virtualization.framework` / Lima; the Windows path already runs through WSL) so `sbx` behaves the same
+  everywhere. (Native Linux namespaces don't exist on macOS/Windows — this is "ship a fast Linux VM," and the
+  per-run cost stays low because the VM is persistent.)
+
+**Sharper feedback.**
+- **Tree-sitter AST localization + semantic deltas.** † Map a fault to its enclosing function/node, and match
+  diagnostics across runs by *AST node* (GumTree-style) rather than a ±3-line window — so a diagnostic on a
+  moved or renamed function still matches after a refactor. (The crash/compile *location* already comes
+  file:line-accurate from the tool; Tree-sitter's real payoff is the delta and the enclosing-scope context.)
+- **Print the offending value.** † The index that overflowed, the null pointer, expected-vs-got — captured at
+  the fault. Cheapest via light instrumentation first; an **eBPF uprobe** layer is the ambitious, log-format-
+  agnostic version (Linux-only, high effort).
+
+**Research-grade / later.**
+- **Parallel-run race detection.** Flagging nondeterminism under parallel tests is useful but cuts against the
+  determinism thesis and is a genuine research problem (rr / Hermit territory) — deliberately last.
+
 ---
 
 MIT. Built as a systems + ML-research portfolio piece; the reasoning and every cited number live in
