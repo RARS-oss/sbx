@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  📘 <a href="docs/REPORT.md">Technical report</a> &nbsp;·&nbsp;
-  📊 <a href="docs/report.html">Styled report (HTML + figures)</a> &nbsp;·&nbsp;
+  📘 <a href="docs/REPORT.md">Technical report</a> (renders on GitHub) &nbsp;·&nbsp;
+  📊 <a href="https://rars-oss.github.io/sbx/">Styled version</a> (live once the repo is public) &nbsp;·&nbsp;
   🔬 <a href="research/">Research &amp; prior art</a>
 </p>
 
@@ -106,6 +106,19 @@ the executor is **hermetic** — and it is measurable: under the hermetic profil
 sanitizer tasks is **byte-identical across 40/40 runs**; with ASLR on, **0/40** (and crash identity itself
 drifted until it was made address-free). This is why the feedback lives *inside* the executor, not in a
 post-hoc filter that never sees two runs.
+
+## Security &amp; threat model
+
+`sbx` runs untrusted code, so its boundary is stated plainly. The **default profile** — user/pid/mount/net
+namespaces + a single-uid map + `pivot_root` with the old root detached + a seccomp denylist installed last
+under `no_new_privs` — contains the mis-configuration classes that matter, and **29/29 escape probes pass on
+the default flags**. The seccomp filter is a **layer** (kernel-attack-surface reduction + a lock on the
+mount/namespace calls, x32 ABI variants included), not the boundary itself: `--no-seccomp` drops the
+read-only-bind guarantee, and `--net` (shared host net namespace) / `--inherit-env` (host env into the child)
+are opt-in and change the threat model. Without a delegated cgroup v2 subtree there is no memory ceiling
+(`RLIMIT_AS` is off so AddressSanitizer can map its 20 TB shadow), so a delegated cgroup is required to bound
+memory against untrusted code. This is a research sandbox with an honest boundary — not a hardened
+hostile-multi-tenant jail; the full threat-model note is in [`docs/REPORT.md` §6.6](docs/REPORT.md).
 
 ## What's inside — the concepts on display
 

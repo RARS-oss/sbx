@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Probe how many CC turns a single JSON-emitting reply costs when built-in tools are disabled.
 set -u
+WINUSER="${WINUSER:-$USER}"   # set WINUSER=<your Windows username> if it differs from your WSL user
 SPF_WSL=/tmp/sbx-sp-test.txt
-SPF_WIN='C:\Users\user\AppData\Local\Temp\sbx-sp-test.txt'
+SPF_WIN="C:\\Users\\$WINUSER\\AppData\\Local\\Temp\\sbx-sp-test.txt"
 printf 'You fix bugs. Reply with EXACTLY one JSON object like {"name":"run","arguments":{}} and nothing else. You have no real tools.' > "$SPF_WSL"
-cp "$SPF_WSL" /mnt/c/Users/user/AppData/Local/Temp/sbx-sp-test.txt
-CLAUDE='C:\Users\user\.local\bin\claude.exe'
-cd /mnt/c/Users/user
+cp "$SPF_WSL" "/mnt/c/Users/$WINUSER/AppData/Local/Temp/sbx-sp-test.txt"
+CLAUDE="C:\\Users\\$WINUSER\\.local\\bin\\claude.exe"
+cd "/mnt/c/Users/$WINUSER" || exit 1
 for MT in 1 2 3 4; do
   echo "=== max-turns $MT ==="
   printf 'The file a.c does not compile. Run the tests first.' | \

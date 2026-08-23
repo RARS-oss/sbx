@@ -121,8 +121,8 @@ all-facts prompt fixes fewer bugs than the best subset (−8.2 % pass@1) [16]; l
 agent success (OR 0.49 per SD) [17]; LLM summaries of observations hide failure signals and lengthen
 trajectories by 13–15 % [1].
 
-**Sanitizer and crash feedback.** Crash-site repair from regex-distilled ASan reports fixed 358 ARVO
-bugs for \$0.68 [18]; DebugHarness distils sanitizer signatures and lets the agent drive GDB to
+**Sanitizer and crash feedback.** Crash-site repair from regex-distilled ASan reports fixed ~7,400 crash
+bugs for \$1 [18]; DebugHarness distils sanitizer signatures and lets the agent drive GDB to
 89.5 % on SEC-bench — and shows sanitizer reports suffice for spatial bugs while temporal ones need
 dynamic state [19]; AutoPatchBench shows crash-site plausibility overstates correctness (≈60 % stop
 the crash, 5–11 % survive differential tests) [20]. None ablates distilled vs full reports on cost.
@@ -441,7 +441,7 @@ filesystem (`/home /root /var`, `/proc/1/root`, `/work/..`), writes outside `/wo
 `/dev/kmsg`, `/proc/sysrq-trigger` `/proc/kcore` `/proc/sys`, `sudo`, `io_uring`/`bpf`/`AF_ALG`,
 hostname and secret-named env leaks: **29/29 contained** (one hardening came out of the first run:
 the tmpfs root is now remounted read-only after setup). This is containment against the
-mis-configuration classes SandboxEscapeBench found to matter, not a kernel-security claim.
+mis-configuration classes SandboxEscapeBench found to matter, not a kernel-security claim. The default profile (user/pid/mount/net namespaces + a single-uid map + `pivot_root` with the old root detached + a seccomp denylist installed last under `no_new_privs`) contains untrusted code, and the probes exercise the **default flags on the native ABI**. The boundaries, stated plainly: the seccomp filter is a *layer* — attack-surface reduction plus a lock on the mount/namespace calls (their x32 ABI variants are blocked too) — not the boundary itself, so `--no-seccomp` removes the read-only-bind guarantee; `--net` (shared host net namespace) and `--inherit-env` (host environment passed into the child) are opt-in and change the threat model; and without a delegated cgroup v2 subtree there is no memory ceiling (RLIMIT_AS is off so AddressSanitizer can reserve its shadow), so a delegated cgroup is required to bound memory against untrusted code.
 
 *Localization accuracy* (`localization_check.py`): does the verdict's first user frame (or first
 error diagnostic) point at the ground-truth faulting line? **10/10 tasks** — and the check itself
@@ -671,7 +671,7 @@ agent-sandbox, OpenSandbox, OpenShell, Anthropic sandbox-runtime, Codex sandbox;
 rules). [8] Anthropic, "Quantifying infrastructure noise in agentic coding evals", Feb 2026. [9]
 Terminal-Bench 2.1 release notes, May 2026. [10] Yang et al., SWE-agent, arXiv:2405.15793. [11] "Is
 Three the Magic Number?", arXiv:2607.05197. [12] RustAssistant, ICSE'25, arXiv:2308.05177. [13]
-VeriHarness, arXiv:2607.14167. [14] PGS, arXiv:2506.18315. [15] Generative Compilation,
+VeriHarness ("Structured Feedback Improves Repair in an LLM Agent Loop"), arXiv:2607.14167. [14] PGS, arXiv:2506.18315. [15] Generative Compilation,
 arXiv:2607.13921. [16] Fact Selection, arXiv:2404.05520. [17] "What Makes a Good Bug Report for an
 AI Agent?", arXiv:2607.07593. [18] WilliamT, arXiv:2505.13103. [19] DebugHarness, arXiv:2604.03610.
 [20] AutoPatchBench, Meta 2025. [21] AgentDiet 2509.23586; ACON 2510.00615; SWE-Pruner 2601.16746;

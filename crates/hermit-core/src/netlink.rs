@@ -92,7 +92,9 @@ pub fn loopback_up() -> anyhow::Result<()> {
         if n < (size_of::<NlMsgHdr>() + 4) as isize {
             return Err(anyhow::anyhow!("netlink: short ack ({n} bytes)"));
         }
-        let hdr = &*(buf.as_ptr() as *const NlMsgHdr);
+        // read_unaligned: `buf` is a `[u8; 256]` (align 1), so a plain reference-deref of a
+        // multi-byte-field struct out of it would be UB on strict-alignment targets.
+        let hdr = std::ptr::read_unaligned(buf.as_ptr() as *const NlMsgHdr);
         if hdr.ty == NLMSG_ERROR {
             let err = i32::from_ne_bytes([
                 buf[size_of::<NlMsgHdr>()],

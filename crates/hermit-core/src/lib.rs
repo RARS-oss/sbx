@@ -302,8 +302,11 @@ pub fn run(spec: &Spec) -> Result<Outcome> {
     // 1 MiB stack for the child closure; the child execs almost immediately.
     let mut stack = vec![0u8; 1 << 20];
     let cb: nix::sched::CloneCb = Box::new(|| child::child_main(&cfg));
-    // SAFETY: single-threaded at this point (reader threads are spawned below);
-    // the closure only touches `cfg` (owned data) and raw fds.
+    // SAFETY: the child runs after a fork-like clone WITHOUT CLONE_VM, so until it execs it may
+    // touch only its own data (`cfg`) and raw fds — no locks a parent thread could hold. This
+    // requires `run()` to be called before the caller spawns threads: the reader threads below are
+    // created *after* the clone, and the CLI is single-threaded. A multithreaded caller risks an
+    // async-signal-unsafe-after-fork deadlock in the child's allocations — call `run()` first.
     let pid = unsafe { nix::sched::clone(cb, &mut stack, flags, Some(libc::SIGCHLD)) }?;
 
     // Parent side: close child ends, write id maps, release the child.

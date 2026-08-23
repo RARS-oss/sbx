@@ -25,7 +25,7 @@ res("host /var visible", os.path.exists("/var") and len(os.listdir("/var")) > 0)
 # 3. escape via /proc/1/root or /proc/self/root (old root detached -> same view)
 try:
     out = os.listdir("/proc/1/root")
-    res("/proc/1/root shows host", "home" in out and os.path.exists("/proc/1/root/home/user"), str(out)[:80])
+    res("/proc/1/root shows host", "home" in out and os.path.exists("/proc/1/root/root"), str(out)[:80])
 except Exception as e:
     res("/proc/1/root shows host", False)
 # 4. write outside /work (ro binds, tmpfs root)

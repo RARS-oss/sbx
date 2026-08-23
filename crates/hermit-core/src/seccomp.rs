@@ -16,8 +16,14 @@
 //!   `fspick`, `mount_setattr`, `chroot`, `sethostname`, `setdomainname`,
 //!   `personality` (ASLR state is fixed), `settimeofday`, `clock_settime`,
 //!   `clock_adjtime`, `adjtimex`;
-//! * `socket(AF_ALG, …)` (CVE-2026-31431 "Copy Fail" class) and other exotic
-//!   families; `AF_UNIX`, `AF_INET`, `AF_INET6`, `AF_NETLINK` stay allowed.
+//! * `socket(AF_ALG, …)` (a large historical kernel-crypto attack surface) and
+//!   other exotic families; `AF_UNIX`, `AF_INET`, `AF_INET6`, `AF_NETLINK` stay allowed.
+//!
+//! This is a **denylist** (default-allow): it reduces kernel attack surface and locks the
+//! mount/namespace calls that would unpick the setup — it is a layer on top of the namespace +
+//! uid-map boundary, not the boundary itself. The x32 ABI variants of every denied call are also
+//! blocked (see `apply`). On a kernel without user namespaces or with `--no-seccomp`, that layer
+//! is absent; see the threat-model note in the README.
 //!
 //! Denied calls return `EPERM` (not `SIGSYS`) so that probing code degrades
 //! gracefully (`io_uring` users fall back to epoll, for instance).
@@ -98,9 +104,13 @@ fn denied_syscalls() -> Vec<i64> {
 /// `PR_SET_NO_NEW_PRIVS` already set (unprivileged seccomp requires it).
 pub fn apply() -> anyhow::Result<()> {
     let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
+    // Also deny the x32 ABI variant (nr | 0x40000000): the same call through the x32 entry would
+    // otherwise slip past a raw-number denylist. no_new_privs is set, so the filter is inherited.
+    const X32: i64 = 0x4000_0000;
     for nr in denied_syscalls() {
         // Empty rule vector = match every invocation of this syscall.
         rules.insert(nr, vec![]);
+        rules.insert(nr | X32, vec![]);
     }
     // socket(): deny everything except AF_UNIX(1), AF_INET(2), AF_INET6(10), AF_NETLINK(16).
     // Expressed as: match (= deny) when domain is one of the exotic families we care about.
@@ -127,6 +137,17 @@ pub fn apply() -> anyhow::Result<()> {
         )?])?);
     }
     rules.insert(libc::SYS_socket, socket_rules);
+    // x32 socket(): rebuild the same family-block rules for the x32 entry.
+    let mut socket_rules_x32 = Vec::new();
+    for fam in blocked_families {
+        socket_rules_x32.push(SeccompRule::new(vec![SeccompCondition::new(
+            0,
+            SeccompCmpArgLen::Dword,
+            SeccompCmpOp::Eq,
+            *fam,
+        )?])?);
+    }
+    rules.insert(libc::SYS_socket | X32, socket_rules_x32);
 
     let filter = SeccompFilter::new(
         rules,

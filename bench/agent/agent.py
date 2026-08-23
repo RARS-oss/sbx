@@ -276,6 +276,13 @@ def shape(condition: str, sbx_json: dict, corrupt: dict | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- sbx execution
+def _within(child: Path, root: Path) -> bool:
+    """True iff `child` is `root` or strictly inside it — a real path-boundary check, so a sibling
+    like `<root>-evil/x` is NOT treated as inside `<root>` and `./x`/`a/../x` resolve correctly."""
+    root, child = root.resolve(), child.resolve()
+    return child == root or root in child.parents
+
+
 def _to_wsl_path(p: str) -> str:
     """C:\\Users\\X\\... -> /mnt/c/Users/X/... (for reaching a Windows path from a WSL process)."""
     p = str(p)
@@ -932,7 +939,7 @@ class ClaudeCLIModel:
 
         if self.via_cmd:
             full = ["cmd.exe", "/d", "/c"] + argv
-            cwd = "/mnt/c/Users/user"
+            cwd = os.environ.get("SBX_CLI_CWD", "/mnt/c")
         else:
             full = argv
             cwd = None
@@ -1185,7 +1192,7 @@ def run_episode(task: Task, condition: str, model: str, effort: str, max_turns: 
             if name == "read_file":
                 m.tool_calls["read_file"] += 1
                 p = (work / str(inp.get("path", ""))).resolve()
-                if not str(p).startswith(str(work.resolve())) or not p.is_file():
+                if not _within(p, work) or not p.is_file():
                     res = f"error: no such file: {inp.get('path')}"
                 else:
                     res = p.read_text(errors="replace")
@@ -1200,9 +1207,10 @@ def run_episode(task: Task, condition: str, model: str, effort: str, max_turns: 
                     res = "error: run the tests first (call run) to see the current failure, then edit."
                     m.tool_calls["write_file"] -= 1
                     m.tool_calls["invalid"] += 1
-                elif not str(p).startswith(str(work.resolve())):
+                elif not _within(p, work):
                     res = "error: path outside project"
-                elif rel in task.protected:
+                elif p in {(work / x).resolve() for x in task.protected}:
+                    # compare RESOLVED paths so `./test.sh` or `a/../test.sh` cannot slip past
                     res = f"error: {rel} is protected and must not be modified"
                 else:
                     p.parent.mkdir(parents=True, exist_ok=True)
