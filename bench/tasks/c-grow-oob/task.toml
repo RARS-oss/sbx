@@ -1,0 +1,13 @@
+name = "c-grow-oob"
+lang = "c"
+family = "memory-safety"
+bug = "fixed-size buffer overflown by a runtime-generated stream; the real fix is a dynamic buffer, not a bigger constant"
+prompt = """
+`gen.c` generates a stream of bytes and prints `total=<N> sum=<S>`. `sh test.sh` compiles it with
+AddressSanitizer and checks the output is exactly `total=335 sum=42445`. It currently crashes. Fix
+the bug in `gen.c` so the test passes; do not modify `test.sh` or the expected output.
+"""
+run = "sh test.sh"
+files = ["gen.c"]
+protected = ["test.sh"]
+timeout = 120
