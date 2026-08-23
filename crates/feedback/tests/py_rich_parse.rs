@@ -20,5 +20,9 @@ fn rich_traceback_is_parsed() {
     assert_eq!(fuf.line, Some(8));
     assert_eq!(fuf.func.as_deref(), Some("divide"));
     // the box-drawing lines must not leak into the tail
-    assert!(v.tail.iter().all(|l| !l.contains('│') && !l.contains('╭')), "tail: {:?}", v.tail);
+    assert!(
+        v.tail.iter().all(|l| !l.contains('│') && !l.contains('╭')),
+        "tail: {:?}",
+        v.tail
+    );
 }

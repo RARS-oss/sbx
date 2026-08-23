@@ -21,7 +21,10 @@ fn crash_hints_are_rendered_for_known_kinds() {
         v.crash.as_ref().and_then(|c| c.region.as_deref()),
         Some("0 bytes after a 40-byte region")
     );
-    assert!(text.contains("  offset: 0 bytes after a 40-byte region"), "{text}");
+    assert!(
+        text.contains("  offset: 0 bytes after a 40-byte region"),
+        "{text}"
+    );
     let ub = include_str!("fixtures/ubsan.txt");
     let v = distill(
         b"",

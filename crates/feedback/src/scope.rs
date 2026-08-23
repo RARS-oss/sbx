@@ -143,7 +143,11 @@ pub fn enrich_scopes(verdict: &mut Verdict, root: &Path) {
         }
     }
     if let Some(crash) = verdict.crash.as_mut() {
-        for fr in crash.frames.iter_mut().filter(|f| f.user && f.func.is_none()) {
+        for fr in crash
+            .frames
+            .iter_mut()
+            .filter(|f| f.user && f.func.is_none())
+        {
             if let (Some(file), Some(line)) = (fr.file.as_deref(), fr.line) {
                 if let Some(lang) = lang_of(file) {
                     if let Some(src) = source_of(file) {

@@ -139,7 +139,8 @@ static RE_CTEST_SUMMARY: Lazy<Regex> =
 
 // go test: `--- FAIL: TestName (0.00s)` / `--- PASS:` / `--- SKIP:`; the `t.Errorf` location
 // (`    file_test.go:LINE: message`) prints *before* the summary line, so we buffer it per test.
-static RE_GO_RESULT: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*--- (FAIL|PASS|SKIP): (\S+)").unwrap());
+static RE_GO_RESULT: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\s*--- (FAIL|PASS|SKIP): (\S+)").unwrap());
 static RE_GO_LOC: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^\s+([\w./@-]+_test\.go):(\d+): (.*)").unwrap());
 // Jest: `Tests:       1 failed, 2 passed, 3 total`. Vitest: `Tests  1 failed | 2 passed (3)`.
@@ -158,7 +159,8 @@ static RE_JUNIT_FAIL: Lazy<Regex> = Lazy::new(|| {
 static RE_GRADLE_FAIL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(\S+(?:\.\S+)*) > (\S.*?) (FAILED|PASSED)\s*$").unwrap());
 // a failing test line in either (● jest, × / ✕ / ✗ vitest); ✓ (pass) is deliberately excluded.
-static RE_JS_FAILNAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(?:●|✕|✗|×)\s+(.+\S)\s*$").unwrap());
+static RE_JS_FAILNAME: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\s*(?:●|✕|✗|×)\s+(.+\S)\s*$").unwrap());
 static RE_JS_LOC: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"([\w./@-]+\.(?:test|spec)\.[cm]?[jt]sx?):(\d+):\d+").unwrap());
 

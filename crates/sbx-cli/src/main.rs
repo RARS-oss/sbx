@@ -172,7 +172,11 @@ fn main() -> Result<()> {
                         .unwrap_or("")
                         .trim()
                         .to_string();
-                    groups.entry(det_key(&v)).or_insert((vec![], show)).0.push(i);
+                    groups
+                        .entry(det_key(&v))
+                        .or_insert((vec![], show))
+                        .0
+                        .push(i);
                 }
                 if groups.len() == 1 {
                     println!("[sbx] DETERMINISM: {repeat}/{repeat} runs identical (deterministic)");
@@ -329,7 +333,10 @@ fn det_key(v: &Verdict) -> String {
     if let Some(t) = &v.tests {
         let mut names: Vec<&str> = t.failures.iter().map(|f| f.name.as_str()).collect();
         names.sort_unstable();
-        s.push_str(&format!("|tests={}/{}/{}:{names:?}", t.passed, t.failed, t.errors));
+        s.push_str(&format!(
+            "|tests={}/{}/{}:{names:?}",
+            t.passed, t.failed, t.errors
+        ));
     }
     let mut diags: Vec<String> = v
         .diagnostics

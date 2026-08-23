@@ -62,7 +62,13 @@ fn junit_surefire_is_parsed() {
     let t = v.tests.clone().expect("tests");
     assert_eq!(t.runner, "junit");
     assert_eq!((t.passed, t.failed), (2, 1));
-    assert!(t.failures.iter().any(|f| f.name == "com.example.CalcTest.testAdd"), "{:?}", t.failures);
+    assert!(
+        t.failures
+            .iter()
+            .any(|f| f.name == "com.example.CalcTest.testAdd"),
+        "{:?}",
+        t.failures
+    );
 }
 
 #[test]
@@ -71,5 +77,9 @@ fn junit_gradle_is_parsed() {
     let t = v.tests.clone().expect("tests");
     assert_eq!(t.runner, "junit");
     assert_eq!(t.failed, 1);
-    assert!(t.failures.iter().any(|f| f.name.contains("testAdd")), "{:?}", t.failures);
+    assert!(
+        t.failures.iter().any(|f| f.name.contains("testAdd")),
+        "{:?}",
+        t.failures
+    );
 }
