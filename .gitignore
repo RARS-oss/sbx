@@ -12,3 +12,8 @@ bench/out/figs-png/
 bench/out/*.output
 bench/out/_*.json
 bench/scripts/_*.sh
+
+# local secrets
+.env
+.env.*
+!.env.example
