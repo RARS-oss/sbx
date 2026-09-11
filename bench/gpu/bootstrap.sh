@@ -4,7 +4,12 @@
 # Run on a fresh Ubuntu 22.04/24.04 pod that already has the NVIDIA driver + CUDA
 # (RunPod "PyTorch 2.x" template, or a Vast.ai CUDA image). One command:
 #
-#     curl -fsSL https://raw.githubusercontent.com/RARS-oss/sbx/main/bench/gpu/bootstrap.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/RARS-oss/sbx/8c38a4e54484102166f5a80947e2c40bed53663f/bench/gpu/bootstrap.sh -o bootstrap.sh
+#     sha256sum bootstrap.sh     # compare with the checksum in the commit / release notes you reviewed
+#     bash bootstrap.sh
+#
+# Fetch by commit (or a reviewed tag), never by branch: a branch URL executes whatever
+# is on that branch at the moment you run it. SBX_REF below pins the clone the same way.
 #
 # It: installs toolchains, builds `sbx`, creates a venv with vLLM + the harness deps,
 # downloads the model, and launches an OpenAI-compatible endpoint that the harness
@@ -30,9 +35,10 @@ PKGS="git curl build-essential clang python3 python3-venv python3-pip pkg-config
 sudo apt-get install -y -qq $PKGS 2>/dev/null || apt-get install -y -qq $PKGS
 
 log "2/5  rust + build sbx"
-if ! command -v cargo >/dev/null 2>&1; then curl -fsSL https://sh.rustup.rs | sh -s -- -y; fi
+if ! command -v cargo >/dev/null 2>&1; then curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal; fi
 . "$HOME/.cargo/env"
-[ -d sbx ] || git clone --depth 1 https://github.com/RARS-oss/sbx.git
+SBX_REF="${SBX_REF:-8c38a4e54484102166f5a80947e2c40bed53663f}"          # commit or tag to build; override to test a branch
+[ -d sbx ] || { git clone https://github.com/RARS-oss/sbx.git && git -C sbx checkout -q "$SBX_REF"; }
 ( cd sbx && cargo build --release -p sbx-cli )
 export PATH="$ROOT/sbx/target/release:$PATH"
 echo "sbx: $(sbx --version 2>/dev/null || echo built)"
